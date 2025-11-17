@@ -1,0 +1,20 @@
+# Rust & Cargo
+/target
+Cargo.lock
+
+# Secrets
+.env
+
+# Local Test Files
+rule.json
+data.json
+
+# Docker Data
+/postgres-data
+/mosquitto/data
+/mosquitto/log
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store

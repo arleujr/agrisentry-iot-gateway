@@ -1,0 +1,31 @@
+[package]
+name = "agrisentry-iot-gateway"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# Core asynchronous runtime
+tokio = { version = "1", features = ["full"] }
+
+# MQTT client
+rumqttc = "0.22.0"
+
+# .env file management
+dotenvy = "0.15"
+
+# Asynchronous SQL toolkit
+sqlx = { version = "0.7", features = [ "runtime-tokio-rustls", "postgres", "uuid" ] }
+
+# Serialization / Deserialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# HTTP server framework
+actix-web = "4"
+actix-cors = "0.7"
+
+# UUID generation and serde support
+uuid = { version = "1.8", features = ["v4", "serde"] }
+
+# Command-Line Interface parser
+clap = { version = "4", features = ["derive"] }
