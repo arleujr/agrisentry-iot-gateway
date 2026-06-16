@@ -1,59 +1,109 @@
 use actix_web::{web, App, HttpServer};
-use dotenvy::dotenv;
+use sqlx::postgres::PgPoolOptions;
 use std::env;
-use tracing::{info, Level};
-use tracing_subscriber::FmtSubscriber;
+use tokio::signal;
+use tokio::sync::watch;
 
-mod db;
-mod models;
 mod mqtt;
-mod api;
-mod error; // Assuming GatewayError resides here based on your db.rs
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
-    // 1. Bootstrapping Environment & High-Performance Logging
-    dotenv().ok();
-    let subscriber = FmtSubscriber::builder()
-        .with_max_level(Level::INFO) // Set to DEBUG in development to see raw SQL
-        .finish();
-    tracing::subscriber::set_global_default(subscriber)
-        .expect("Failed to initialize tracing subscriber");
+    // Initialize standard logging subscribers
+    tracing_subscriber::fmt::init();
+    tracing::info!("🚀 Starting AgriSentry Enterprise IoT Gateway...");
 
-    info!("🚀 Booting AgriSentry Multi-Protocol Gateway...");
-
-    // 2. Initialize the Unified Database Core
     let database_url = env::var("DATABASE_URL")
-        .expect("CRITICAL: DATABASE_URL environment variable is missing");
-    let db_client = db::DbClient::new(&database_url)
-        .await
-        .expect("CRITICAL: Failed to establish database connection pool");
+        .expect("CRITICAL: DATABASE_URL environment variable must be set");
 
-    // 3. Spawn the MQTT Background Worker (Tokio async thread)
-    let mqtt_db_client = db_client.clone();
-    let mqtt_host = env::var("MQTT_HOST").unwrap_or_else(|_| "localhost".to_string());
-    let mqtt_port = env::var("MQTT_PORT")
+    // Establish the high-performance connection pool
+    let pool = PgPoolOptions::new()
+        .max_connections(20)
+        .connect(&database_url)
+        .await
+        .expect("CRITICAL: Failed to establish PostgreSQL connection pool");
+
+    // Initialize the Graceful Shutdown state transmission channel
+    // false = running, true = shutting down broadcast
+    let (shutdown_tx, shutdown_rx) = watch::channel(false);
+
+    // Initialize MQTT configuration variables from environment with safe local defaults
+    let mqtt_host = env::var("MQTT_HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
+    let mqtt_port: u16 = env::var("MQTT_PORT")
         .unwrap_or_else(|_| "1883".to_string())
-        .parse::<u16>()
-        .unwrap_or(1883);
-    
-    tokio::spawn(async move {
-        mqtt::start_mqtt_worker(mqtt_db_client, &mqtt_host, mqtt_port).await;
+        .parse()
+        .expect("MQTT_PORT must be a valid u16 integer");
+
+    // Spawn the MQTT Background Worker task concurrently
+    let mqtt_pool = pool.clone();
+    let mqtt_handle = tokio::spawn(async move {
+        // Passing the 4 required parameters to match the fixed src/mqtt.rs signature
+        mqtt::start_mqtt_worker(mqtt_pool, &mqtt_host, mqtt_port, shutdown_rx).await;
     });
 
-    // 4. Mount the Database state and Ignite the HTTP Server on the Main Thread
-    let server_port = env::var("HTTP_PORT").unwrap_or_else(|_| "8080".to_string());
-    let server_host = env::var("HTTP_HOST").unwrap_or_else(|_| "0.0.0.0".to_string());
-    let actix_db_data = web::Data::new(db_client);
-
-    info!("🌐 Actix-Web HTTP Server active and listening on {}:{}", server_host, server_port);
-    
-    HttpServer::new(move || {
+    // Build and prepare the Actix-Web Server engine instance
+    let server = HttpServer::new(move || {
         App::new()
-            .app_data(actix_db_data.clone())
-            .service(api::ingest_telemetry)
+            .app_data(web::Data::new(pool.clone()))
+            // Define production REST API modules here (e.g., .service(ingest_telemetry))
     })
-    .bind(format!("{}:{}", server_host, server_port))?
-    .run()
-    .await
+    .bind(("0.0.0.0", 8080))?
+    .run();
+
+    // Extract the server runtime handle before running to control its lifecycle down the road
+    let server_handle = server.handle();
+
+    // Concurrent OS termination signaling listeners setup
+    let ctrl_c = async {
+        signal::ctrl_c()
+            .await
+            .expect("Failed to install SIGINT handler");
+    };
+
+    #[cfg(unix)]
+    let sigterm = async {
+        signal::unix::signal(signal::unix::SignalKind::terminate())
+            .expect("Failed to install SIGTERM handler")
+            .recv()
+            .await;
+    };
+
+    #[cfg(not(unix))]
+    let sigterm = std::future::pending::<()>();
+
+    // Race the active server future against the termination signals listener matrix
+    // This allows the server thread to execute non-blockingly until interrupted
+    tokio::select! {
+        _ = server => {
+            tracing::warn!("HTTP Server workflow terminated unexpectedly on its own.");
+        }
+        _ = ctrl_c => {
+            tracing::warn!("⛔ Received SIGINT (Ctrl+C). Initiating Graceful Shutdown...");
+        }
+        _ = sigterm => {
+            tracing::warn!("🐳 Received SIGTERM (Docker/K8s). Initiating Graceful Shutdown...");
+        }
+    }
+
+    // PHASE 1: Broadcast execution termination to the streaming MQTT background workers
+    tracing::info!("Phase 1: Broadcasting shutdown token to background workers...");
+    let _ = shutdown_tx.send(true);
+
+    // PHASE 2: Shut down the server listeners gracefully
+    // Passing true ensures all currently active in-flight HTTP transactions drop or finish safely
+    tracing::info!("Phase 2: Draining in-flight HTTP streams and stopping Actix-Web engine...");
+    server_handle.stop(true).await;
+
+    // PHASE 3: Wait for the background Tokio task loops to yield and finish clean connection drops
+    tracing::info!("Phase 3: Awaiting MQTT worker thread resource cleanup...");
+    if let Err(e) = mqtt_handle.await {
+        tracing::error!("MQTT Task experienced unhandled panic during close routine: {:?}", e);
+    }
+
+    // PHASE 4: Close the core database connection pool explicitly
+    // This must occur dead last. Closing early causes concurrent worker connection leaks or memory panics.
+    tracing::info!("Phase 4: Flashing caches and closing PostgreSQL connection pool safely...");
+    pool.close().await;
+
+    tracing::info!("🎉 Graceful Shutdown sequence finalized successfully. Process exiting.");
+    Ok(())
 }
