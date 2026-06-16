@@ -1,20 +1,31 @@
+# ========================
 # Rust & Cargo
-/target
-Cargo.lock
+# ========================
+/target/
+# NÃO ignoramos o Cargo.lock para binários!
 
-# Secrets
+# ========================
+# Infraestrutura e Dados Locais (CRÍTICO)
+# ========================
+/postgres-data/
+/mosquitto/data/
+/mosquitto/log/
+
+# ========================
+# Segredos e Variáveis de Ambiente
+# ========================
 .env
+.env.*
 
-# Local Test Files
+# ========================
+# Arquivos de Teste Temporários
+# ========================
 rule.json
 data.json
 
-# Docker Data
-/postgres-data
-/mosquitto/data
-/mosquitto/log
-
-# IDE / OS
+# ========================
+# IDE / Sistema Operacional
+# ========================
 .vscode/
 .idea/
 .DS_Store
