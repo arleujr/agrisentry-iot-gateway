@@ -40,10 +40,13 @@ async fn main() -> std::io::Result<()> {
         mqtt::start_mqtt_worker(mqtt_pool, &mqtt_host, mqtt_port, shutdown_rx).await;
     });
 
+    // Create a clone specifically for the server to avoid ownership errors
+    let pool_for_server = pool.clone();
+
     // Build and prepare the Actix-Web Server engine instance
     let server = HttpServer::new(move || {
         App::new()
-            .app_data(web::Data::new(pool.clone()))
+            .app_data(web::Data::new(pool_for_server.clone()))
             // Define production REST API modules here (e.g., .service(ingest_telemetry))
     })
     .bind(("0.0.0.0", 8080))?
@@ -71,7 +74,6 @@ async fn main() -> std::io::Result<()> {
     let sigterm = std::future::pending::<()>();
 
     // Race the active server future against the termination signals listener matrix
-    // This allows the server thread to execute non-blockingly until interrupted
     tokio::select! {
         _ = server => {
             tracing::warn!("HTTP Server workflow terminated unexpectedly on its own.");
@@ -89,7 +91,6 @@ async fn main() -> std::io::Result<()> {
     let _ = shutdown_tx.send(true);
 
     // PHASE 2: Shut down the server listeners gracefully
-    // Passing true ensures all currently active in-flight HTTP transactions drop or finish safely
     tracing::info!("Phase 2: Draining in-flight HTTP streams and stopping Actix-Web engine...");
     server_handle.stop(true).await;
 
@@ -100,7 +101,6 @@ async fn main() -> std::io::Result<()> {
     }
 
     // PHASE 4: Close the core database connection pool explicitly
-    // This must occur dead last. Closing early causes concurrent worker connection leaks or memory panics.
     tracing::info!("Phase 4: Flashing caches and closing PostgreSQL connection pool safely...");
     pool.close().await;
 
