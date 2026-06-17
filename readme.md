@@ -2,11 +2,10 @@
 
 ![Rust](https://img.shields.io/badge/rust-1.75%2B-orange.svg)
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-15+-336791.svg)
-![TimescaleDB](https://img.shields.io/badge/TimescaleDB-Time_Series-yellow.svg)
 ![Actix-Web](https://img.shields.io/badge/Actix--Web-HTTP-blue.svg)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
-High-performance, multi-protocol asynchronous ingestion gateway engineered in Rust. This microservice acts as the critical entry point for high-throughput cyber-physical agricultural telemetry streams, funneling massive telemetry events concurrently into a TimescaleDB instance. All data points are persisted with an initial validation status to enable downstream processing by the AgriSentry AI engine.
+High-performance, multi-protocol asynchronous ingestion gateway engineered in Rust. This microservice acts as the critical entry point for high-throughput cyber-physical agricultural telemetry streams, funneling massive telemetry events concurrently into a PostgreSQL instance. All data points are persisted with an initial validation status to enable downstream processing and analysis.
 
 ## System Architecture
 
@@ -18,17 +17,17 @@ graph LR
     A -->|HTTP REST| C(Actix-Web Server)
     B --> D{Unified SQLx Pool}
     C --> D
-    D -->|Optimistic Insert| E[(TimescaleDB)]
+    D -->|Optimistic Insert| E[(PostgreSQL)]
 ```
 
 * **REST Layer:** Handled via an Actix-Web HTTP server routing stateful payload requests non-blockingly.
 * **Telemetry Streaming Layer:** Powered by an asynchronous Rumqttc event loop multiplexing edge hardware data.
-* **Persistence Layer:** Unified SQLx client pools dispatching operations straight to a TimescaleDB time-series hypertable.
+* **Persistence Layer:** Unified SQLx client pools dispatching operations straight to a PostgreSQL relational database.
 
 ## Key Engineering Decisions
 
 * **Multi-Protocol Ingestion:** Native capability to simultaneously ingest structural payload events via HTTP REST endpoints and lightweight streaming slices via MQTT brokers.
-* **Single-Query Optimistic Ingestion:** Instead of executing double-query footprints (INSERT ON CONFLICT for sensors followed by reading inserts), the database client optimistically targets the hypertable. Fallback configuration sequences only execute if a physical sensor mismatch occurs, cutting database load by 50%.
+* **Single-Query Optimistic Ingestion:** Instead of executing double-query footprints (INSERT ON CONFLICT for sensors followed by reading inserts), the database client optimistically targets the database. Fallback configuration sequences only execute if a physical sensor mismatch occurs, cutting database load by 50%.
 * **Thread-Safe Graceful Shutdown:** Leverages cross-thread watch broadcast state signaling. Upon receiving OS termination signals (SIGINT/SIGTERM), the gateway drains active HTTP server streams, informs the Mosquitto broker to drop connections safely, flushes memory buffers, and closes connection pools without data loss or orphan sockets.
 * **Exponential Backoff Retry Matrix:** Database statement errors caused by temporary network latency or locking conditions trigger an automated retry loop with incremental delay multipliers, preventing application panic and safeguarding edge telemetry data.
 * **Dynamic Buffer Sizing:** Parameterized network event channels to mitigate internal backpressure constraints under heavy loading stress.
@@ -69,3 +68,7 @@ To compile and launch the gateway server locally:
 ```bash
 cargo run
 ```
+
+## License
+
+Distributed under the MIT License.
