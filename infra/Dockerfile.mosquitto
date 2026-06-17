@@ -1,0 +1,4 @@
+FROM eclipse-mosquitto:2.0
+
+COPY infra/mosquitto.conf /mosquitto/config/mosquitto.conf
+EXPOSE 1883
