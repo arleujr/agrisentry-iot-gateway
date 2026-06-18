@@ -1,6 +1,19 @@
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
 
+// Estruturas que estavam faltando
+#[derive(Debug, Deserialize)]
+pub struct TelemetryData {
+    pub value: f64,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct RuleFromDb {
+    pub trigger_condition: String,
+    pub trigger_value: f64,
+    pub action_type: String,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct SensorPayload {
     pub device_id: String,
@@ -10,7 +23,6 @@ pub struct SensorPayload {
     pub metadata_hash: Option<String>,
 }
 
-// O ENUM que representa o status de qualidade do dado no banco (Antiredundância)
 #[derive(Debug, sqlx::Type)]
 #[sqlx(type_name = "DataQualityStatus", rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum DataQualityStatus {

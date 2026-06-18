@@ -1,6 +1,6 @@
 // src/engine/simulator.rs
 
-use crate::{RuleFromDb, TelemetryData};
+use crate::models::{RuleFromDb, TelemetryData};
 
 /// Represents the potential outcome of a rule simulation.
 /// Using an enum is safer and more professional than raw strings.

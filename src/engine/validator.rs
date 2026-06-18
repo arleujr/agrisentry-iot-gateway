@@ -1,4 +1,4 @@
-use crate::RuleFromDb;
+use crate::models::RuleFromDb;
 
 /// Checks if a rule fetched from the database is valid before sending it to a device.
 /// Returns Ok(()) on success or an error message string on failure.
