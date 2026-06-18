@@ -24,7 +24,7 @@ pub struct SensorPayload {
 }
 
 #[derive(Debug, sqlx::Type)]
-#[sqlx(type_name = "DataQualityStatus", rename_all = "SCREAMING_SNAKE_CASE")]
+#[sqlx(type_name = "dataqualitystatus", rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum DataQualityStatus {
     Pending,
     Valid,

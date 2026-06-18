@@ -18,7 +18,7 @@ impl DbClient {
         sqlx::query(
             r#"
             INSERT INTO "sensor_readings" (id, value, sensor_id, status, created_at)
-            SELECT gen_random_uuid(), $1, s.id, $2::"DataQualityStatus", $3
+            SELECT gen_random_uuid(), $1, s.id, $2::dataqualitystatus, $3
             FROM "sensors" s
             WHERE s.hardware_id = $4
             "#
