@@ -1,4 +1,4 @@
-use sqlx::PgPool;
+use sqlx::{PgPool, Postgres, query};
 use crate::models::{SensorPayload, DataQualityStatus};
 use crate::error::GatewayError;
 use chrono::{DateTime, Utc};
@@ -16,18 +16,18 @@ impl DbClient {
 
     /// Inserts a telemetry reading into TimescaleDB via HTTP as Pending
     pub async fn insert_reading(&self, payload: &SensorPayload) -> Result<u64, GatewayError> {
-        let result = sqlx::query!(
+        let result = sqlx::query(
             r#"
             INSERT INTO "sensor_readings" (id, value, sensor_id, status, created_at)
             SELECT gen_random_uuid(), $1, s.id, $2, $3
             FROM "sensors" s
             WHERE s.hardware_id = $4
             "#,
-            payload.reading_value,
-            DataQualityStatus::Pending,
-            payload.timestamp,
-            payload.device_id
         )
+        .bind(payload.reading_value)
+        .bind(DataQualityStatus::Pending)
+        .bind(payload.timestamp)
+        .bind(&payload.device_id)
         .execute(&self.pool)
         .await?;
 
@@ -41,18 +41,18 @@ impl DbClient {
         value: f64, 
         timestamp: DateTime<Utc>
     ) -> Result<u64, GatewayError> {
-        let result = sqlx::query!(
+        let result = sqlx::query(
             r#"
             INSERT INTO "sensor_readings" (id, value, sensor_id, status, created_at)
             SELECT gen_random_uuid(), $1, s.id, $2, $3
             FROM "sensors" s
             WHERE s.hardware_id = $4
             "#,
-            value,
-            DataQualityStatus::Pending,
-            timestamp,
-            device_id
         )
+        .bind(value)
+        .bind(DataQualityStatus::Pending)
+        .bind(timestamp)
+        .bind(device_id)
         .execute(&self.pool)
         .await?;
 
@@ -64,21 +64,21 @@ impl DbClient {
         &self, 
         limit: i64
     ) -> Result<Vec<(Uuid, f64, DateTime<Utc>)>, GatewayError> {
-        let rows = sqlx::query!(
+        // Usamos query_as mapeando explicitamente a tupla para evitar atritos com a macro estrita
+        let rows = sqlx::query_as::<Postgres, (Uuid, f64, DateTime<Utc>)>(
             r#"
             SELECT id, value, created_at 
             FROM "sensor_readings" 
             WHERE status = $1
             LIMIT $2
             "#,
-            DataQualityStatus::Pending,
-            limit
         )
+        .bind(DataQualityStatus::Pending)
+        .bind(limit)
         .fetch_all(&self.pool)
         .await?;
 
-        let result = rows.into_iter().map(|r| (r.id, r.value, r.created_at)).collect();
-        Ok(result)
+        Ok(rows)
     }
 
     /// Updates the status of a record after AI or Rules Engine analysis
@@ -89,17 +89,17 @@ impl DbClient {
         status: DataQualityStatus, 
         note: &str
     ) -> Result<(), GatewayError> {
-        sqlx::query!(
+        sqlx::query(
             r#"
             UPDATE "sensor_readings"
             SET status = $1, ai_analysis_note = $2
             WHERE id = $3 AND created_at = $4
             "#,
-            status,
-            note,
-            id,
-            created_at
         )
+        .bind(status)
+        .bind(note)
+        .bind(id)
+        .bind(created_at)
         .execute(&self.pool)
         .await?;
 
