@@ -5,7 +5,7 @@ use crate::models::SensorPayload;
 
 /// HTTP Endpoint for REST telemetry ingestion.
 /// Ideal for testing, integrations, or edge devices without MQTT capabilities.
-#[post("/api/telemetry")]
+#[post("/telemetry")] // 👇 AQUI ESTÁ A MUDANÇA (Tirei o /api)
 pub async fn ingest_telemetry(
     db: web::Data<DbClient>,
     payload: web::Json<SensorPayload>,
