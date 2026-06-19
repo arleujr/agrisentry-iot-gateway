@@ -2,6 +2,7 @@ use rumqttc::{AsyncClient, MqttOptions, QoS, Event, Incoming};
 use sqlx::PgPool;
 use std::time::Duration;
 use tokio::sync::watch;
+use crate::db::DbClient;
 
 /// Initializes the background MQTT worker task.
 pub async fn start_mqtt_worker(
@@ -50,37 +51,43 @@ pub async fn start_mqtt_worker(
                             let sensor_type = topic_parts[3].to_string();
                             
                             if let Ok(payload_str) = String::from_utf8(p.payload.to_vec()) {
+                                // Dentro do loop do mqtt.rs, onde você processa o payload_str:
                                 if let Ok(reading_value) = payload_str.parse::<f64>() {
-                                    let db_pool = pool.clone();
+                                    // Cria a instância do DbClient usando o pool clonado
+                                    let db_client = DbClient::new(pool.clone());
+                                    let mac_address_clone = mac_address.clone();
+                                    let sensor_type_clone = sensor_type.clone();
                                     
                                     tokio::spawn(async move {
-                                        let result = sqlx::query(
-                                            r#"
-                                            INSERT INTO "sensor_readings" (id, value, sensor_id, status, created_at)
-                                            SELECT gen_random_uuid(), $1, s.id, 'PENDING'::"DataQualityStatus", NOW()
-                                            FROM "sensors" s
-                                            WHERE s.hardware_id = $2
-                                            "#
-                                        )
-                                        .bind(reading_value)
-                                        .bind(&mac_address)
-                                        .execute(&db_pool)
-                                        .await;
-
-                                        match result {
-                                            Ok(res) if res.rows_affected() > 0 => {
-                                                tracing::info!("[INGESTION SUCCESS] Logged PENDING reading for Sensor [{} - {}]: {:.2}", mac_address, sensor_type, reading_value);
+                                        // Chamando a função profissional do seu db.rs
+                                        match db_client.insert_mqtt_reading(&mac_address_clone, reading_value).await {
+                                            Ok(rows) if rows > 0 => {
+                                                tracing::info!(
+                                                    "[INGESTION SUCCESS] Logged PENDING reading for Sensor [{} - {}]: {:.2}",
+                                                    mac_address_clone,
+                                                    sensor_type_clone,
+                                                    reading_value
+                                                );
                                             }
                                             Ok(_) => {
-                                                tracing::warn!("[INGESTION REJECTED] Valid data but hardware registration entry missing for MAC: {}", mac_address);
+                                                tracing::warn!(
+                                                    "[INGESTION REJECTED] Valid data but hardware registration entry missing for MAC: {}",
+                                                    mac_address_clone
+                                                );
                                             }
                                             Err(e) => {
-                                                tracing::error!("CRITICAL: TimescaleDB internal insertion statement panic: {:?}", e);
+                                                tracing::error!(
+                                                    "CRITICAL: TimescaleDB internal insertion statement failure: {:?}",
+                                                    e
+                                                );
                                             }
                                         }
                                     });
                                 } else {
-                                    tracing::warn!("Discarded packet payload: Could not translate stream segment '{}' into float precision matrix.", payload_str);
+                                    tracing::warn!(
+                                        "Discarded packet payload: Could not translate stream segment '{}' into float precision matrix.",
+                                        payload_str
+                                    );
                                 }
                             }
                         }
