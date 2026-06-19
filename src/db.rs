@@ -14,7 +14,7 @@ impl DbClient {
         Self { pool }
     }
 
-    /// Inserts a telemetry reading into TimescaleDB via HTTP as PENDING
+    /// Inserts a telemetry reading into TimescaleDB via HTTP as Pending
     pub async fn insert_reading(&self, payload: &SensorPayload) -> Result<u64, GatewayError> {
         let result = sqlx::query!(
             r#"
@@ -24,7 +24,7 @@ impl DbClient {
             WHERE s.hardware_id = $4
             "#,
             payload.reading_value,
-            DataQualityStatus::PENDING as DataQualityStatus,
+            DataQualityStatus::Pending,
             payload.timestamp,
             payload.device_id
         )
@@ -49,7 +49,7 @@ impl DbClient {
             WHERE s.hardware_id = $4
             "#,
             value,
-            DataQualityStatus::PENDING as DataQualityStatus,
+            DataQualityStatus::Pending,
             timestamp,
             device_id
         )
@@ -59,7 +59,7 @@ impl DbClient {
         Ok(result.rows_affected())
     }
 
-    /// Fetches records with status PENDING for processing
+    /// Fetches records with status Pending for processing
     pub async fn fetch_pending_readings(
         &self, 
         limit: i64
@@ -71,7 +71,7 @@ impl DbClient {
             WHERE status = $1
             LIMIT $2
             "#,
-            DataQualityStatus::PENDING as DataQualityStatus,
+            DataQualityStatus::Pending,
             limit
         )
         .fetch_all(&self.pool)
@@ -95,7 +95,7 @@ impl DbClient {
             SET status = $1, ai_analysis_note = $2
             WHERE id = $3 AND created_at = $4
             "#,
-            status as DataQualityStatus,
+            status,
             note,
             id,
             created_at
