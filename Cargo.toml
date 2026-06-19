@@ -38,3 +38,4 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # HTTP Server for health checks and ingestion API
 actix-web = "4.13.0"
 actix-cors = "0.7.0"
+
