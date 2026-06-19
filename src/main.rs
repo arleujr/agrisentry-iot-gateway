@@ -237,17 +237,21 @@ async fn main() -> std::io::Result<()> {
 
     // Configure and bind runtime HTTP Rest Server instance
     let server = HttpServer::new(move || {
-        let cors = Cors::permissive(); // ✅ A Marreta do CORS ativada!
+        let cors = Cors::default()
+            .allow_any_origin()
+            .allow_any_method()
+            .allow_any_header()
+            .max_age(3600);
 
         App::new()
-            .wrap(cors) // ✅ Middleware injetado
+            .wrap(cors) 
             .app_data(db_client.clone())
             .service(crate::api::ingest_telemetry)
             .route("/", web::get().to(health_check))
             .route("/health", web::get().to(health_check))
             .route("/api/v1/dashboard/metrics", web::get().to(get_dashboard_metrics)) // New live metrics pipeline
     })
-    .bind(("0.0.0.0", port))? // ✅ Binding na porta correta do Render
+    .bind(("0.0.0.0", port))? 
     .run();
 
     let server_handle = server.handle();
