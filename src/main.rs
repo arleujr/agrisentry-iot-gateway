@@ -1,5 +1,5 @@
 use actix_web::{web, App, HttpResponse, HttpServer, Responder};
-use actix_cors::Cors; // ✅ Importação do CORS
+use actix_cors::Cors; // CORS Middleware to allow the Vue frontend to connect
 use sqlx::postgres::PgPoolOptions;
 
 use std::env;
@@ -7,6 +7,7 @@ use std::time::Duration;
 use tokio::signal;
 use tokio::sync::watch;
 
+// Module declarations
 mod models;
 mod engine;
 use crate::engine::mqtt;
@@ -67,7 +68,7 @@ async fn get_dashboard_metrics(db_client: web::Data<crate::db::DbClient>) -> imp
     }
 }
 
-/// Retrieve latest system logs (Essa função estava faltando neste arquivo!)
+/// Retrieve latest system logs for the Vue Dashboard
 async fn get_system_logs(db_client: web::Data<crate::db::DbClient>) -> impl Responder {
     match sqlx::query!(
         r#"SELECT component, message, level, created_at FROM "system_events" ORDER BY id DESC LIMIT 25"#
@@ -147,7 +148,7 @@ async fn main() -> std::io::Result<()> {
 
     let mqtt_host = env::var("MQTT_HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
     let mqtt_port: u16 = env::var("MQTT_PORT")
-        .unwrap_or_else(|_| "1883".to_string())
+        .unwrap_or_else(|_| "8883".to_string()) // Updated default to 8883 for secure connections
         .parse()
         .expect("MQTT_PORT must be a valid u16 integer");
 
@@ -251,6 +252,7 @@ async fn main() -> std::io::Result<()> {
 
     // Configure and bind runtime HTTP Rest Server instance
     let server = HttpServer::new(move || {
+        // Global CORS configuration allowing all connections (Suitable for development/dashboards)
         let cors = Cors::default()
             .allow_any_origin()
             .allow_any_method()
@@ -260,14 +262,14 @@ async fn main() -> std::io::Result<()> {
         App::new()
             .wrap(cors) 
             .app_data(db_client.clone())
-            // 👇 AQUI ESTAVA O SEGREDO! Agrupando todas as rotas no /api/v1
+            // 🌐 API V1 Scope - All Dashboard and Telemetry routes live here
             .service(
                 web::scope("/api/v1")
                     .service(crate::api::ingest_telemetry)
                     .route("/dashboard/metrics", web::get().to(get_dashboard_metrics))
                     .route("/dashboard/logs", web::get().to(get_system_logs))
             )
-            // Rotas globais obrigatórias de monitoramento
+            // Global monitoring routes
             .route("/", web::get().to(health_check))
             .route("/health", web::get().to(health_check))
     })
