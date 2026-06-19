@@ -13,6 +13,17 @@ mod error;
 mod api;
 mod db;
 
+/// Helper function to safely map Python's API string responses to Rust's strong types
+fn status_from_str(status: &str) -> Option<models::DataQualityStatus> {
+    match status {
+        "PENDING" => Some(models::DataQualityStatus::Pending),
+        "VALID" => Some(models::DataQualityStatus::Valid),
+        "ANOMALY_NOISE" => Some(models::DataQualityStatus::AnomalyNoise),
+        "ANOMALY_CRITICAL" => Some(models::DataQualityStatus::AnomalyCritical),
+        _ => None,
+    }
+}
+
 async fn health_check() -> impl Responder {
     HttpResponse::Ok().json(serde_json::json!({
         "status": "healthy",
@@ -135,7 +146,7 @@ async fn main() -> std::io::Result<()> {
                                         if let Ok(ai_response) = response.json::<serde_json::Value>().await {
                                             if let Some(results) = ai_response.get("results").and_then(|r| r.as_array()) {
                                                 for result in results {
-                                                    if let (Some(id_str), Some(created_at_str), Some(status), Some(note)) = (
+                                                    if let (Some(id_str), Some(created_at_str), Some(status_str), Some(note)) = (
                                                         result.get("id").and_then(|v| v.as_str()),
                                                         result.get("created_at").and_then(|v| v.as_str()),
                                                         result.get("status").and_then(|v| v.as_str()),
@@ -147,8 +158,13 @@ async fn main() -> std::io::Result<()> {
                                                         ) {
                                                             let created_at_utc = chrono::DateTime::<chrono::Utc>::from(created_at);
 
-                                                            if let Err(err) = db_client.update_reading_status(id, created_at_utc, status, note).await {
-                                                                tracing::error!("Failed to update DB for ID {:?}: {:?}", id, err);
+                                                            // Safe conversion to the fixed Enum type
+                                                            if let Some(status_enum) = status_from_str(status_str) {
+                                                                if let Err(err) = db_client.update_reading_status(id, created_at_utc, status_enum, note).await {
+                                                                    tracing::error!("Failed to update DB for ID {:?}: {:?}", id, err);
+                                                                }
+                                                            } else {
+                                                                tracing::error!("Received unknown data quality status from AI engine: {}", status_str);
                                                             }
                                                         }
                                                     }
