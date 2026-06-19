@@ -2,6 +2,7 @@ use sqlx::PgPool;
 use crate::models::{SensorPayload, DataQualityStatus};
 use crate::error::GatewayError;
 use chrono::{DateTime, Utc};
+use uuid::Uuid;
 
 #[derive(Clone)]
 pub struct DbClient {
@@ -58,5 +59,52 @@ impl DbClient {
         .await?;
 
         Ok(result.rows_affected())
+    }
+
+    /// Fetches records with status PENDING for processing
+    /// Returns a vector of (id, value, created_at)
+    pub async fn fetch_pending_readings(
+        &self, 
+        limit: i64
+    ) -> Result<Vec<(Uuid, f64, DateTime<Utc>)>, GatewayError> {
+        let rows = sqlx::query!(
+            r#"
+            SELECT id, value, created_at 
+            FROM "sensor_readings" 
+            WHERE status = 'PENDING'::dataqualitystatus
+            LIMIT $1
+            "#,
+            limit
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        let result = rows.into_iter().map(|r| (r.id, r.value, r.created_at)).collect();
+        Ok(result)
+    }
+
+    /// Updates the status of a record after AI or Rules Engine analysis
+    pub async fn update_reading_status(
+        &self, 
+        id: Uuid, 
+        created_at: DateTime<Utc>, 
+        status: &str, 
+        note: &str
+    ) -> Result<(), GatewayError> {
+        sqlx::query!(
+            r#"
+            UPDATE "sensor_readings"
+            SET status = $1::dataqualitystatus, ai_analysis_note = $2
+            WHERE id = $3 AND created_at = $4
+            "#,
+            status,
+            note,
+            id,
+            created_at
+        )
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
     }
 }
