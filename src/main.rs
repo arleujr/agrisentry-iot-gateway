@@ -35,7 +35,6 @@ async fn health_check() -> impl Responder {
 
 /// Real-time metrics aggregator query exposing telemetry and data quality KPI metrics for dashboards
 async fn get_dashboard_metrics(db_client: web::Data<crate::db::DbClient>) -> impl Responder {
-    // Executes the high-performance Time-Bucket aggregation directly from PostgreSQL/TimescaleDB
     match sqlx::query!(
         r#"
         SELECT 
@@ -64,6 +63,29 @@ async fn get_dashboard_metrics(db_client: web::Data<crate::db::DbClient>) -> imp
         Err(e) => {
             tracing::error!("Database analytics aggregation failed: {:?}", e);
             HttpResponse::InternalServerError().json(serde_json::json!({ "error": "Analytics execution failure" }))
+        }
+    }
+}
+
+/// Retrieve latest system logs (Essa função estava faltando neste arquivo!)
+async fn get_system_logs(db_client: web::Data<crate::db::DbClient>) -> impl Responder {
+    match sqlx::query!(
+        r#"SELECT component, message, level, created_at FROM "system_events" ORDER BY id DESC LIMIT 25"#
+    )
+    .fetch_all(&db_client.pool)
+    .await {
+        Ok(rows) => {
+            let logs: Vec<serde_json::Value> = rows.into_iter().map(|r| serde_json::json!({
+                "component": r.component,
+                "message": r.message,
+                "level": r.level,
+                "created_at": r.created_at
+            })).collect();
+            HttpResponse::Ok().json(logs)
+        }
+        Err(e) => {
+            tracing::error!("Failed to fetch system logs: {:?}", e);
+            HttpResponse::InternalServerError().finish()
         }
     }
 }
@@ -145,26 +167,21 @@ async fn main() -> std::io::Result<()> {
     let analysis_handle = tokio::spawn(async move {
         tracing::info!("🧠 AI & Rule Analysis Background Worker started in production mode.");
         let db_worker_client = crate::db::DbClient::new(analysis_pool);
-
-        // Initialize reusable, connection-pooled HTTP client for cross-service streaming
         let http_client = reqwest::Client::new();
 
         loop {
             tokio::select! {
-                // Intercept interrupt signals via shutdown channel
                 res = analysis_shutdown_rx.changed() => {
                     if res.is_ok() && *analysis_shutdown_rx.borrow() {
                         tracing::warn!("Analysis Background Worker caught termination sequence. Exiting lifecycle cleanly...");
                         break;
                     }
                 }
-                // Periodic batch ingestion scheduler (5-second intervals)
                 _ = tokio::time::sleep(Duration::from_secs(5)) => {
                     match db_worker_client.fetch_pending_readings(100).await {
                         Ok(readings) if !readings.is_empty() => {
                             tracing::info!("Extracting batch of {} PENDING telemetry records for AI analytics evaluation...", readings.len());
 
-                            // Transform TimescaleDB data rows into structured payload compliant with FastAPI models
                             let telemetry_readings: Vec<serde_json::Value> = readings
                                 .iter()
                                 .map(|(id, value, created_at)| {
@@ -178,7 +195,6 @@ async fn main() -> std::io::Result<()> {
 
                             let payload = serde_json::json!({ "readings": telemetry_readings });
 
-                            // Dispatch batch dataset via network HTTP POST to the AI inference microservice
                             match http_client.post(&ai_api_url).json(&payload).send().await {
                                 Ok(response) => {
                                     if response.status().is_success() {
@@ -197,7 +213,6 @@ async fn main() -> std::io::Result<()> {
                                                         ) {
                                                             let created_at_utc = chrono::DateTime::<chrono::Utc>::from(created_at);
 
-                                                            // Type-safe conversion of string markers to internal domain enums
                                                             if let Some(status_enum) = status_from_str(status_str) {
                                                                 if let Err(err) = db_worker_client.update_reading_status(id, created_at_utc, status_enum, note).await {
                                                                     tracing::error!("Failed to persist AI classification update for ID {:?}: {:?}", id, err);
@@ -220,7 +235,7 @@ async fn main() -> std::io::Result<()> {
                                 }
                             }
                         }
-                        Ok(_) => {} // No records pending analysis, skip execution cycle safely
+                        Ok(_) => {} 
                         Err(e) => tracing::error!("Error intercepted inside the Analysis Worker execution pipeline: {:?}", e),
                     }
                 }
@@ -229,7 +244,6 @@ async fn main() -> std::io::Result<()> {
         tracing::info!("🏁 Analysis Background Worker fully decoupled and terminated.");
     });
 
-    // ✅ Pega a porta dinamicamente do Render, ou usa 8080 localmente
     let port: u16 = env::var("PORT")
         .unwrap_or_else(|_| "8080".to_string())
         .parse()
@@ -246,17 +260,22 @@ async fn main() -> std::io::Result<()> {
         App::new()
             .wrap(cors) 
             .app_data(db_client.clone())
-            .service(crate::api::ingest_telemetry)
+            // 👇 AQUI ESTAVA O SEGREDO! Agrupando todas as rotas no /api/v1
+            .service(
+                web::scope("/api/v1")
+                    .service(crate::api::ingest_telemetry)
+                    .route("/dashboard/metrics", web::get().to(get_dashboard_metrics))
+                    .route("/dashboard/logs", web::get().to(get_system_logs))
+            )
+            // Rotas globais obrigatórias de monitoramento
             .route("/", web::get().to(health_check))
             .route("/health", web::get().to(health_check))
-            .route("/api/v1/dashboard/metrics", web::get().to(get_dashboard_metrics)) // New live metrics pipeline
     })
     .bind(("0.0.0.0", port))? 
     .run();
 
     let server_handle = server.handle();
 
-    // Setup operating system async signal handlers for secure process orchestration
     let ctrl_c = async {
         signal::ctrl_c()
             .await
