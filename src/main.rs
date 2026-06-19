@@ -84,19 +84,27 @@ async fn main() -> std::io::Result<()> {
         mqtt::start_mqtt_worker(mqtt_pool, &mqtt_host, mqtt_port, shutdown_rx).await;
     });
 
-    // 🧠 Spawn Analysis Worker
+    // 🧠 Spawn Analysis Worker (Enterprise version integrated with Python AI API)
     let analysis_pool = pool.clone();
-    let mut analysis_shutdown_rx = shutdown_tx.subscribe(); // duplicate shutdown channel
+    let mut analysis_shutdown_rx = shutdown_tx.subscribe();
+
+    // Pull AI API URL from environment variable
+    let ai_api_url = env::var("AI_API_URL")
+        .unwrap_or_else(|_| "http://127.0.0.1:8000/v1/analyze".to_string());
+
     let analysis_handle = tokio::spawn(async move {
-        tracing::info!("🧠 AI & Rule Analysis Background Worker started successfully.");
+        tracing::info!("🧠 AI & Rule Analysis Background Worker started in production mode.");
         let db_client = crate::db::DbClient::new(analysis_pool);
+
+        // Initialize reusable HTTP client
+        let http_client = reqwest::Client::new();
 
         loop {
             tokio::select! {
                 // Monitor shutdown signal
                 res = analysis_shutdown_rx.changed() => {
                     if res.is_ok() && *analysis_shutdown_rx.borrow() {
-                        tracing::warn!("Analysis Worker caught termination sequence. Exiting analysis loop...");
+                        tracing::warn!("Analysis Worker caught termination sequence. Exiting safely...");
                         break;
                     }
                 }
@@ -104,20 +112,56 @@ async fn main() -> std::io::Result<()> {
                 _ = tokio::time::sleep(Duration::from_secs(5)) => {
                     match db_client.fetch_pending_readings(100).await {
                         Ok(readings) if !readings.is_empty() => {
-                            tracing::info!("Processing batch of {} pending telemetry lines...", readings.len());
-                            
-                            for (id, value, created_at) in readings {
-                                // Example rule engine simulation
-                                let mut status = "VALID";
-                                let mut note = "Reading processed successfully. No anomaly detected.";
+                            tracing::info!("Pulling batch of {} PENDING rows to send to AI...", readings.len());
 
-                                if value > 90.0 {
-                                    status = "ANOMALY_CRITICAL";
-                                    note = "AI ALERT: Critical value exceeded operational safety threshold.";
+                            // Map DB rows to JSON payload expected by FastAPI
+                            let telemetry_readings: Vec<serde_json::Value> = readings
+                                .iter()
+                                .map(|(id, value, created_at)| {
+                                    serde_json::json!({
+                                        "id": id,
+                                        "value": value,
+                                        "created_at": created_at
+                                    })
+                                })
+                                .collect();
+
+                            let payload = serde_json::json!({ "readings": telemetry_readings });
+
+                            // Dispatch batch via HTTP POST to Python microservice
+                            match http_client.post(&ai_api_url).json(&payload).send().await {
+                                Ok(response) => {
+                                    if response.status().is_success() {
+                                        if let Ok(ai_response) = response.json::<serde_json::Value>().await {
+                                            if let Some(results) = ai_response.get("results").and_then(|r| r.as_array()) {
+                                                for result in results {
+                                                    if let (Some(id_str), Some(created_at_str), Some(status), Some(note)) = (
+                                                        result.get("id").and_then(|v| v.as_str()),
+                                                        result.get("created_at").and_then(|v| v.as_str()),
+                                                        result.get("status").and_then(|v| v.as_str()),
+                                                        result.get("note").and_then(|v| v.as_str()),
+                                                    ) {
+                                                        if let (Ok(id), Ok(created_at)) = (
+                                                            uuid::Uuid::parse_str(id_str),
+                                                            chrono::DateTime::parse_from_rfc3339(created_at_str)
+                                                        ) {
+                                                            let created_at_utc = chrono::DateTime::<chrono::Utc>::from(created_at);
+
+                                                            if let Err(err) = db_client.update_reading_status(id, created_at_utc, status, note).await {
+                                                                tracing::error!("Failed to update DB for ID {:?}: {:?}", id, err);
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                                tracing::info!("🚀 Batch of {} telemetry readings processed and classified successfully by AI.", results.len());
+                                            }
+                                        }
+                                    } else {
+                                        tracing::error!("FastAPI service returned error status: {:?}", response.status());
+                                    }
                                 }
-
-                                if let Err(err) = db_client.update_reading_status(id, created_at, status, note).await {
-                                    tracing::error!("Failed to update reading status {:?}: {:?}", id, err);
+                                Err(e) => {
+                                    tracing::error!("Critical network failure communicating with AI microservice: {:?}", e);
                                 }
                             }
                         }
@@ -133,8 +177,8 @@ async fn main() -> std::io::Result<()> {
     // Configure HTTP server
     let server = HttpServer::new(move || {
         App::new()
-            .app_data(db_client.clone()) // inject database client
-            .service(crate::api::ingest_telemetry) // register API route
+            .app_data(db_client.clone())
+            .service(crate::api::ingest_telemetry)
             .route("/", web::get().to(health_check))
             .route("/health", web::get().to(health_check))
     })
