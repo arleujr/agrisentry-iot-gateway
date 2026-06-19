@@ -1,4 +1,5 @@
 use actix_web::{web, App, HttpResponse, HttpServer, Responder};
+use actix_cors::Cors; // ✅ Importação do CORS
 use sqlx::postgres::PgPoolOptions;
 
 use std::env;
@@ -228,16 +229,25 @@ async fn main() -> std::io::Result<()> {
         tracing::info!("🏁 Analysis Background Worker fully decoupled and terminated.");
     });
 
+    // ✅ Pega a porta dinamicamente do Render, ou usa 8080 localmente
+    let port: u16 = env::var("PORT")
+        .unwrap_or_else(|_| "8080".to_string())
+        .parse()
+        .expect("PORT must be a valid u16 integer");
+
     // Configure and bind runtime HTTP Rest Server instance
     let server = HttpServer::new(move || {
+        let cors = Cors::permissive(); // ✅ A Marreta do CORS ativada!
+
         App::new()
+            .wrap(cors) // ✅ Middleware injetado
             .app_data(db_client.clone())
             .service(crate::api::ingest_telemetry)
             .route("/", web::get().to(health_check))
             .route("/health", web::get().to(health_check))
             .route("/api/v1/dashboard/metrics", web::get().to(get_dashboard_metrics)) // New live metrics pipeline
     })
-    .bind(("0.0.0.0", 8080))?
+    .bind(("0.0.0.0", port))? // ✅ Binding na porta correta do Render
     .run();
 
     let server_handle = server.handle();
