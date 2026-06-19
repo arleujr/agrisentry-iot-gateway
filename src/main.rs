@@ -28,7 +28,7 @@ async fn main() -> std::io::Result<()> {
     let database_url = env::var("DATABASE_URL")
         .expect("CRITICAL: DATABASE_URL environment variable must be set");
 
-    // Estabelece o pool de conexões de alta performance
+    // Establish high-performance PostgreSQL connection pool
     let pool = {
         let mut attempts = 0;
         let max_attempts = 10;
@@ -67,7 +67,7 @@ async fn main() -> std::io::Result<()> {
         established_pool.expect("CRITICAL: Failed to establish PostgreSQL connection pool after maximum retry ceiling")
     };
 
-    // Cria o DbClient e injeta no Actix
+    // Create DbClient and inject into Actix
     let db_client = web::Data::new(crate::db::DbClient::new(pool.clone()));
 
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
@@ -78,15 +78,63 @@ async fn main() -> std::io::Result<()> {
         .parse()
         .expect("MQTT_PORT must be a valid u16 integer");
 
+    // Spawn MQTT worker
     let mqtt_pool = pool.clone();
     let mqtt_handle = tokio::spawn(async move {
         mqtt::start_mqtt_worker(mqtt_pool, &mqtt_host, mqtt_port, shutdown_rx).await;
     });
 
+    // 🧠 Spawn Analysis Worker
+    let analysis_pool = pool.clone();
+    let mut analysis_shutdown_rx = shutdown_tx.subscribe(); // duplicate shutdown channel
+    let analysis_handle = tokio::spawn(async move {
+        tracing::info!("🧠 AI & Rule Analysis Background Worker started successfully.");
+        let db_client = crate::db::DbClient::new(analysis_pool);
+
+        loop {
+            tokio::select! {
+                // Monitor shutdown signal
+                res = analysis_shutdown_rx.changed() => {
+                    if res.is_ok() && *analysis_shutdown_rx.borrow() {
+                        tracing::warn!("Analysis Worker caught termination sequence. Exiting analysis loop...");
+                        break;
+                    }
+                }
+                // Execute every 5 seconds
+                _ = tokio::time::sleep(Duration::from_secs(5)) => {
+                    match db_client.fetch_pending_readings(100).await {
+                        Ok(readings) if !readings.is_empty() => {
+                            tracing::info!("Processing batch of {} pending telemetry lines...", readings.len());
+                            
+                            for (id, value, created_at) in readings {
+                                // Example rule engine simulation
+                                let mut status = "VALID";
+                                let mut note = "Reading processed successfully. No anomaly detected.";
+
+                                if value > 90.0 {
+                                    status = "ANOMALY_CRITICAL";
+                                    note = "AI ALERT: Critical value exceeded operational safety threshold.";
+                                }
+
+                                if let Err(err) = db_client.update_reading_status(id, created_at, status, note).await {
+                                    tracing::error!("Failed to update reading status {:?}: {:?}", id, err);
+                                }
+                            }
+                        }
+                        Ok(_) => {} // No pending data, skip cycle
+                        Err(e) => tracing::error!("Error in Analysis Worker pipeline: {:?}", e),
+                    }
+                }
+            }
+        }
+        tracing::info!("🏁 Analysis Worker fully terminated.");
+    });
+
+    // Configure HTTP server
     let server = HttpServer::new(move || {
         App::new()
-            .app_data(db_client.clone()) // injeta o banco
-            .service(crate::api::ingest_telemetry) // registra rota do api.rs
+            .app_data(db_client.clone()) // inject database client
+            .service(crate::api::ingest_telemetry) // register API route
             .route("/", web::get().to(health_check))
             .route("/health", web::get().to(health_check))
     })
@@ -130,9 +178,12 @@ async fn main() -> std::io::Result<()> {
     tracing::info!("Phase 2: Draining in-flight HTTP streams and stopping Actix-Web engine...");
     server_handle.stop(true).await;
 
-    tracing::info!("Phase 3: Awaiting MQTT worker thread resource cleanup...");
+    tracing::info!("Phase 3: Awaiting Background Workers resource cleanup...");
     if let Err(e) = mqtt_handle.await {
         tracing::error!("MQTT Task experienced unhandled panic during close routine: {:?}", e);
+    }
+    if let Err(e) = analysis_handle.await {
+        tracing::error!("Analysis Task experienced unhandled panic during close routine: {:?}", e);
     }
 
     tracing::info!("Phase 4: Flashing caches and closing PostgreSQL connection pool safely...");
