@@ -3,6 +3,7 @@ use sqlx::PgPool;
 use std::time::Duration;
 use tokio::sync::watch;
 use crate::db::DbClient;
+use crate::models::MqttPayload; // Import the structured MQTT payload
 
 /// Initializes the background MQTT worker task.
 pub async fn start_mqtt_worker(
@@ -51,22 +52,21 @@ pub async fn start_mqtt_worker(
                             let sensor_type = topic_parts[3].to_string();
                             
                             if let Ok(payload_str) = String::from_utf8(p.payload.to_vec()) {
-                                // Dentro do loop do mqtt.rs, onde você processa o payload_str:
-                                if let Ok(reading_value) = payload_str.parse::<f64>() {
-                                    // Cria a instância do DbClient usando o pool clonado
+                                // ✅ Deserialize structured JSON payload (value + timestamp)
+                                if let Ok(mqtt_data) = serde_json::from_str::<MqttPayload>(&payload_str) {
                                     let db_client = DbClient::new(pool.clone());
                                     let mac_address_clone = mac_address.clone();
                                     let sensor_type_clone = sensor_type.clone();
                                     
                                     tokio::spawn(async move {
-                                        // Chamando a função profissional do seu db.rs
-                                        match db_client.insert_mqtt_reading(&mac_address_clone, reading_value).await {
+                                        // Pass both value and timestamp to db.rs
+                                        match db_client.insert_mqtt_reading(&mac_address_clone, mqtt_data.value, mqtt_data.timestamp).await {
                                             Ok(rows) if rows > 0 => {
                                                 tracing::info!(
                                                     "[INGESTION SUCCESS] Logged PENDING reading for Sensor [{} - {}]: {:.2}",
                                                     mac_address_clone,
                                                     sensor_type_clone,
-                                                    reading_value
+                                                    mqtt_data.value
                                                 );
                                             }
                                             Ok(_) => {
@@ -85,7 +85,7 @@ pub async fn start_mqtt_worker(
                                     });
                                 } else {
                                     tracing::warn!(
-                                        "Discarded packet payload: Could not translate stream segment '{}' into float precision matrix.",
+                                        "Discarded packet payload: Could not parse JSON format. Expected {{'value': f64, 'timestamp': string}} - Received: '{}'",
                                         payload_str
                                     );
                                 }
