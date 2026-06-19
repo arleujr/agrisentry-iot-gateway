@@ -1,5 +1,6 @@
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
+use sqlx::Type;
 
 /// Represents a simple telemetry data point (used in some contexts)
 #[derive(Debug, Deserialize)]
@@ -27,13 +28,13 @@ pub struct SensorPayload {
 
 /// Enum mapping to PostgreSQL custom type `dataqualitystatus`
 /// Used to track the quality status of telemetry readings
-#[derive(Debug, sqlx::Type)]
-#[sqlx(type_name = "dataqualitystatus", rename_all = "SCREAMING_SNAKE_CASE")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Type)]
+#[sqlx(type_name = "dataqualitystatus", rename_all = "UPPERCASE")]
 pub enum DataQualityStatus {
-    Pending,
-    Valid,
-    AnomalyNoise,
-    AnomalyCritical,
+    PENDING,
+    VALID,
+    ANOMALY_NOISE,
+    ANOMALY_CRITICAL,
 }
 
 /// Represents the JSON payload sent by sensors via MQTT
