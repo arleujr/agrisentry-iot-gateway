@@ -27,14 +27,15 @@ pub struct SensorPayload {
 }
 
 /// Enum mapping to PostgreSQL custom type `dataqualitystatus`
-/// Used to track the quality status of telemetry readings
+/// Used to track the quality status of telemetry readings.
+/// Fixed to follow Rust's PascalCase naming conventions while persisting as SCREAMING_SNAKE_CASE.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Type)]
-#[sqlx(type_name = "dataqualitystatus", rename_all = "UPPERCASE")]
+#[sqlx(type_name = "dataqualitystatus", rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum DataQualityStatus {
-    PENDING,
-    VALID,
-    ANOMALY_NOISE,
-    ANOMALY_CRITICAL,
+    Pending,
+    Valid,
+    AnomalyNoise,
+    AnomalyCritical,
 }
 
 /// Represents the JSON payload sent by sensors via MQTT
