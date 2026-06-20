@@ -268,6 +268,7 @@ async fn main() -> std::io::Result<()> {
                     .service(crate::api::ingest_telemetry)
                     .route("/dashboard/metrics", web::get().to(get_dashboard_metrics))
                     .route("/dashboard/logs", web::get().to(get_system_logs))
+                    .route("/dashboard/sensors/latest", web::get().to(crate::api::get_live_sensor_nodes))
             )
             // Global monitoring routes
             .route("/", web::get().to(health_check))
