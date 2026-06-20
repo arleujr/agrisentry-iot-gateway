@@ -181,7 +181,14 @@ async fn main() -> std::io::Result<()> {
                 _ = tokio::time::sleep(Duration::from_secs(5)) => {
                     match db_worker_client.fetch_pending_readings(100).await {
                         Ok(readings) if !readings.is_empty() => {
-                            tracing::info!("Extracting batch of {} PENDING telemetry records for AI analytics evaluation...", readings.len());
+                            let batch_size = readings.len();
+                            tracing::info!("Extracting batch of {} PENDING telemetry records for AI analytics evaluation...", batch_size);
+                            
+                            // Log extraction phase to persistent storage
+                            let extract_msg = format!("Extracted batch of {} PENDING records for AI evaluation.", batch_size);
+                            if let Err(log_err) = db_worker_client.insert_system_log("RUST_CORE", "INFO", &extract_msg).await {
+                                tracing::error!("Failed to write extraction log to db: {:?}", log_err);
+                            }
 
                             let telemetry_readings: Vec<serde_json::Value> = readings
                                 .iter()
@@ -225,6 +232,12 @@ async fn main() -> std::io::Result<()> {
                                                     }
                                                 }
                                                 tracing::info!("🚀 Batch of {} telemetry readings analyzed, classified, and committed successfully by AI runtime.", results.len());
+                                                
+                                                // Log successful analysis phase to persistent storage
+                                                let success_msg = format!("Batch of {} telemetry readings classified by AI runtime.", results.len());
+                                                if let Err(log_err) = db_worker_client.insert_system_log("AI_ENGINE", "INFO", &success_msg).await {
+                                                    tracing::error!("Failed to write runtime success log to db: {:?}", log_err);
+                                                }
                                             }
                                         }
                                     } else {
@@ -233,6 +246,11 @@ async fn main() -> std::io::Result<()> {
                                 }
                                 Err(e) => {
                                     tracing::error!("Critical network transport failure communicating with AI microservice: {:?}", e);
+                                    
+                                    // Log critical transport failure phase to persistent storage
+                                    if let Err(log_err) = db_worker_client.insert_system_log("RUST_CORE", "CRITICAL", "Network transport failure communicating with AI microservice.").await {
+                                        tracing::error!("Failed to write runtime crash log to db: {:?}", log_err);
+                                    }
                                 }
                             }
                         }
@@ -262,8 +280,8 @@ async fn main() -> std::io::Result<()> {
         App::new()
             .wrap(cors) 
             .app_data(db_client.clone())
-            // 🌐 API V1 Scope - All Dashboard and Telemetry routes live here
-            .service(
+            .// 🌐 API V1 Scope - All Dashboard and Telemetry routes live here
+            service(
                 web::scope("/api/v1")
                     .service(crate::api::ingest_telemetry)
                     .route("/dashboard/metrics", web::get().to(get_dashboard_metrics))
