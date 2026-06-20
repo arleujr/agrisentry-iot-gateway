@@ -17,17 +17,22 @@ impl DbClient {
         Self { pool }
     }
 
-    /// Inserts a system telemetry log event into the database for frontend terminal observability
-    pub async fn insert_system_log(&self, component: &str, level: &str, message: &str) -> Result<(), GatewayError> {
-        sqlx::query!(
+    /// Inserts a structured system log event into database storage for UI terminal observability
+    pub async fn insert_system_log(
+        &self, 
+        component: &str, 
+        level: &str, 
+        message: &str
+    ) -> Result<(), GatewayError> {
+        sqlx::query(
             r#"
             INSERT INTO "system_events" (component, level, message, created_at)
             VALUES ($1, $2, $3, NOW())
             "#,
-            component,
-            level,
-            message
         )
+        .bind(component)
+        .bind(level)
+        .bind(message)
         .execute(&self.pool)
         .await?;
 
