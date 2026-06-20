@@ -37,6 +37,7 @@ pub async fn get_live_sensor_nodes(
 ) -> impl Responder {
     
     // Professional LEFT JOIN Query ensuring inventory nodes persist even with empty telemetry states
+    // Added explicit type casts to string text for seamless enum parsing into strong Rust types
     let query = r#"
         WITH telemetry_stats AS (
             SELECT
@@ -74,6 +75,7 @@ pub async fn get_live_sensor_nodes(
         ORDER BY s.name ASC;
     "#;
 
+    // Maps rows efficiently to SensorNodeMetrics safely handling potential database NULL markers
     match sqlx::query_as::<_, SensorNodeMetrics>(query)
         .fetch_all(&db_client.pool)
         .await
@@ -82,7 +84,8 @@ pub async fn get_live_sensor_nodes(
         Err(e) => {
             error!("Database descriptive statistics processing matrix failure: {:?}", e);
             HttpResponse::InternalServerError().json(serde_json::json!({
-                "error": "Telemetry aggregation pipeline execution failure"
+                "error": "Telemetry aggregation pipeline execution failure",
+                "details": format!("{:?}", e)
             }))
         }
     }
