@@ -280,8 +280,8 @@ async fn main() -> std::io::Result<()> {
         App::new()
             .wrap(cors) 
             .app_data(db_client.clone())
-            .// 🌐 API V1 Scope - All Dashboard and Telemetry routes live here
-            service(
+            // 🌐 API V1 Scope - All Dashboard and Telemetry routes live here
+            .service(
                 web::scope("/api/v1")
                     .service(crate::api::ingest_telemetry)
                     .route("/dashboard/metrics", web::get().to(get_dashboard_metrics))
