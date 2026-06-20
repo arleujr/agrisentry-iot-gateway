@@ -55,10 +55,12 @@ pub struct SensorNodeMetrics {
     pub sensor_id: String,
     #[sqlx(rename = "sensor_name")]
     pub name: String,
+    /// Wrapped in Option to prevent 500 ColumnDecode UnexpectedNullError during empty LEFT JOIN states
     #[sqlx(rename = "sensor_type")]
-    pub r#type: String,
+    pub r#type: Option<String>,
     pub latest_reading: Option<f64>,
-    pub unit_of_measurement: String,
+    /// Wrapped in Option to prevent 500 ColumnDecode UnexpectedNullError during empty LEFT JOIN states
+    pub unit_of_measurement: Option<String>,
     pub min_threshold: Option<f64>,
     pub max_threshold: Option<f64>,
     pub arithmetic_mean: Option<f64>,
