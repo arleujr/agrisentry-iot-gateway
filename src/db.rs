@@ -1,20 +1,26 @@
-use sqlx::{PgPool, Postgres, query};
+// db.rs
+use sqlx::{PgPool, Postgres};
 use crate::models::{SensorPayload, DataQualityStatus};
 use crate::error::GatewayError;
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
+/// Database client wrapper for PostgreSQL/TimescaleDB connection pool
 #[derive(Clone)]
 pub struct DbClient {
     pub pool: PgPool,
 }
 
 impl DbClient {
+    /// Creates a new database client instance
     pub fn new(pool: PgPool) -> Self {
         Self { pool }
     }
 
     /// Inserts a telemetry reading into TimescaleDB via HTTP as Pending
+    /// - Generates a UUID for the record
+    /// - Resolves sensor_id from hardware_id
+    /// - Uses payload.timestamp to preserve exact device time
     pub async fn insert_reading(&self, payload: &SensorPayload) -> Result<u64, GatewayError> {
         let result = sqlx::query(
             r#"
@@ -35,6 +41,7 @@ impl DbClient {
     }
 
     /// Inserts a telemetry reading into TimescaleDB from MQTT
+    /// - Similar to insert_reading but accepts raw parameters
     pub async fn insert_mqtt_reading(
         &self, 
         device_id: &str, 
@@ -60,11 +67,12 @@ impl DbClient {
     }
 
     /// Fetches records with status Pending for processing
+    /// - Returns a vector of tuples (id, value, created_at)
     pub async fn fetch_pending_readings(
         &self, 
         limit: i64
     ) -> Result<Vec<(Uuid, f64, DateTime<Utc>)>, GatewayError> {
-        // Usamos query_as mapeando explicitamente a tupla para evitar atritos com a macro estrita
+        // Explicit tuple mapping avoids strict macro conflicts
         let rows = sqlx::query_as::<Postgres, (Uuid, f64, DateTime<Utc>)>(
             r#"
             SELECT id, value, created_at 
@@ -82,6 +90,7 @@ impl DbClient {
     }
 
     /// Updates the status of a record after AI or Rules Engine analysis
+    /// - Matches both id and created_at to ensure exact record update
     pub async fn update_reading_status(
         &self, 
         id: Uuid, 
