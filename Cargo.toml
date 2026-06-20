@@ -9,7 +9,7 @@ description = "High-performance MQTT consumer and TimescaleDB ingestor"
 tokio = { version = "1.35", features = ["full"] }
 
 # MQTT Client (High Performance concurrent consumer)
-rumqttc = "0.24"
+rumqttc = { version = "0.24.0", features = ["use-native-tls"] }
 
 # Database (PostgreSQL / TimescaleDB integration)
 # Note: 'macros' feature enables compile-time SQL query validation
