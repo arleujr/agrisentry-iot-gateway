@@ -33,8 +33,8 @@ pub async fn start_mqtt_worker(
         tracing::error!("🚨 ERROR: Environment variables MQTT_USER or MQTT_PASS not found in Render!");
     }
 
-    // 🚨 Critical step: Enable native TLS transport for secure communication
-    mqttoptions.set_transport(Transport::tls(TlsConfiguration::Native));
+    // 🚨 Corrected line: Enable native TLS transport with no client authentication and no ALPN
+    mqttoptions.set_transport(Transport::tls(TlsConfiguration::Native, None, None));
 
     // Create asynchronous MQTT client and event loop
     let (client, mut eventloop) = AsyncClient::new(mqttoptions, buffer_size);
