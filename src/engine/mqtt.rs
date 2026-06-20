@@ -23,6 +23,16 @@ pub async fn start_mqtt_worker(
     let mut mqttoptions = MqttOptions::new("agrisentry_gateway_core", broker_host, broker_port);
     mqttoptions.set_keep_alive(Duration::from_secs(10));
 
+    // 🔑 Critical fix: Capture and inject EMQX credentials provided by Render
+    let mqtt_user = std::env::var("MQTT_USER").unwrap_or_else(|_| "".to_string());
+    let mqtt_pass = std::env::var("MQTT_PASS").unwrap_or_else(|_| "".to_string());
+    
+    if !mqtt_user.is_empty() && !mqtt_pass.is_empty() {
+        mqttoptions.set_credentials(mqtt_user, mqtt_pass);
+    } else {
+        tracing::error!("🚨 ERROR: Environment variables MQTT_USER or MQTT_PASS not found in Render!");
+    }
+
     // 🚨 Critical step: Enable native TLS transport for secure communication
     mqttoptions.set_transport(Transport::tls(TlsConfiguration::Native));
 
