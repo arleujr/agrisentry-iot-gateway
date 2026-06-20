@@ -1,10 +1,9 @@
-use axum::{extract::Extension, http::StatusCode, Json};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use sqlx::{FromRow, PgPool, Type};
+use sqlx::{FromRow, Type};
 
 // =========================================================================
-// DATA MODELS & DTOS (INDUSTRIAL ENTERPRISE STANDARD)
+// DATA MODELS & DTOS (STRUCTURAL PERSISTENCE LAYER)
 // =========================================================================
 
 /// Represents a simple telemetry data point used in minimal state evaluations
@@ -57,72 +56,12 @@ pub struct SensorNodeMetrics {
     #[sqlx(rename = "sensor_name")]
     pub name: String,
     #[sqlx(rename = "sensor_type")]
-    pub r#type: String, // Architectural categorization: 'humidity', 'temperature', etc.
+    pub r#type: String,
     pub latest_reading: Option<f64>,
     pub unit_of_measurement: String,
     pub min_threshold: Option<f64>,
     pub max_threshold: Option<f64>,
     pub arithmetic_mean: Option<f64>,
-    pub operational_status: Option<String>, // Direct state string representation matching current data node status
+    pub operational_status: Option<String>,
     pub last_telemetry_timestamp: Option<DateTime<Utc>>,
-}
-
-// =========================================================================
-// API ROUTE HANDLERS
-// =========================================================================
-
-/// High-Performance Descriptive Statistics Aggregation Engine.
-/// Generates 24-hour moving statistical metrics window aggregates (MIN, MAX, AVG)
-/// combined with atomic-level instant snapshots of active sensor hardware nodes.
-pub async fn get_live_sensor_nodes(
-    Extension(pool): Extension<PgPool>,
-) -> Result<Json<Vec<SensorNodeMetrics>>, (StatusCode, String)> {
-    
-    // Optimized Common Table Expressions (CTE) separating batch time-series rollups from target point queries
-    let query = r#"
-        WITH telemetry_stats AS (
-            SELECT
-                sensor_id,
-                MIN(value) as min_threshold,
-                MAX(value) as max_threshold,
-                AVG(value) as arithmetic_mean
-            FROM sensor_readings
-            WHERE created_at >= NOW() - INTERVAL '24 hours'
-            GROUP BY sensor_id
-        ),
-        latest_readings AS (
-            SELECT DISTINCT ON (sensor_id)
-                sensor_id,
-                value,
-                status::text as status_str,
-                created_at
-            FROM sensor_readings
-            ORDER BY sensor_id, created_at DESC
-        )
-        SELECT 
-            s.hardware_id,
-            s.name as sensor_name,
-            s.type as sensor_type,
-            lr.value as latest_reading,
-            s.unit as unit_of_measurement,
-            ts.min_threshold,
-            ts.max_threshold,
-            ts.arithmetic_mean,
-            lr.status_str as operational_status,
-            lr.created_at as last_telemetry_timestamp
-        FROM sensors s
-        LEFT JOIN telemetry_stats ts ON s.id = ts.sensor_id
-        LEFT JOIN latest_readings lr ON s.id = lr.sensor_id
-        ORDER BY s.name ASC;
-    "#;
-
-    let metrics = sqlx::query_as::<_, SensorNodeMetrics>(query)
-        .fetch_all(&pool)
-        .await
-        .map_err(|e| {
-            tracing::error!("Database descriptive statistics query execution failure: {:?}", e);
-            (StatusCode::INTERNAL_SERVER_ERROR, "Internal Data Engine Error".to_string())
-        })?;
-
-    Ok(Json(metrics))
 }
