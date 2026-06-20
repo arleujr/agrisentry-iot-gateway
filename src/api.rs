@@ -31,12 +31,12 @@ pub async fn ingest_telemetry(
 }
 
 /// High-Performance Descriptive Statistics Aggregation Engine.
-/// Parses 24-hour moving window statistics directly from TimescaleDB/PostgreSQL subqueries.
+/// Refactored with strict Enterprise LEFT JOIN architectures to prevent UI starvation.
 pub async fn get_live_sensor_nodes(
     db_client: web::Data<DbClient>,
 ) -> impl Responder {
     
-    // Optimized Common Table Expressions (CTE) separating analytic aggregates from chronological point logs
+    // Professional LEFT JOIN Query ensuring inventory nodes persist even with empty telemetry states
     let query = r#"
         WITH telemetry_stats AS (
             SELECT
@@ -66,7 +66,7 @@ pub async fn get_live_sensor_nodes(
             ts.min_threshold,
             ts.max_threshold,
             ts.arithmetic_mean,
-            lr.status_str as operational_status,
+            COALESCE(lr.status_str, 'PENDING') as operational_status,
             lr.created_at as last_telemetry_timestamp
         FROM sensors s
         LEFT JOIN telemetry_stats ts ON s.id = ts.sensor_id
