@@ -17,6 +17,23 @@ impl DbClient {
         Self { pool }
     }
 
+    /// Inserts a system telemetry log event into the database for frontend terminal observability
+    pub async fn insert_system_log(&self, component: &str, level: &str, message: &str) -> Result<(), GatewayError> {
+        sqlx::query!(
+            r#"
+            INSERT INTO "system_events" (component, level, message, created_at)
+            VALUES ($1, $2, $3, NOW())
+            "#,
+            component,
+            level,
+            message
+        )
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
     /// Inserts a telemetry reading into TimescaleDB via HTTP as Pending
     /// - Generates a UUID for the record
     /// - Resolves sensor_id from hardware_id
