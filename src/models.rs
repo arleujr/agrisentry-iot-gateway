@@ -21,7 +21,7 @@ pub struct RuleFromDb {
 }
 
 /// Represents an edge sensor payload ingested via the HTTP REST telemetry API pipeline
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct SensorPayload {
     pub device_id: String,
     pub sensor_type: String,
