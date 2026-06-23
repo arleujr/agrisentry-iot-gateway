@@ -1,5 +1,5 @@
-use actix_web::{web, App, HttpResponse, HttpServer, Responder};
 use actix_cors::Cors; // CORS Middleware to allow the Vue frontend to connect
+use actix_web::{web, App, HttpResponse, HttpServer, Responder};
 use sqlx::postgres::PgPoolOptions;
 use sqlx::Row; // Required for dynamic query field extraction (.get)
 
@@ -42,10 +42,10 @@ async fn get_dashboard_metrics(db_client: web::Data<db::DbClient>) -> impl Respo
         FROM "sensor_readings"
         WHERE created_at > NOW() - INTERVAL '24 hours'
         GROUP BY status;
-        "#
+        "#,
     )
     .fetch_all(&db_client.pool)
-    .await 
+    .await
     {
         Ok(records) => {
             let metrics: Vec<serde_json::Value> = records
@@ -63,7 +63,8 @@ async fn get_dashboard_metrics(db_client: web::Data<db::DbClient>) -> impl Respo
         }
         Err(e) => {
             tracing::error!("Database analytics aggregation failed: {:?}", e);
-            HttpResponse::InternalServerError().json(serde_json::json!({ "error": "Analytics execution failure" }))
+            HttpResponse::InternalServerError()
+                .json(serde_json::json!({ "error": "Analytics execution failure" }))
         }
     }
 }
@@ -104,8 +105,8 @@ async fn main() -> std::io::Result<()> {
     tracing_subscriber::fmt::init();
     tracing::info!("🚀 Starting AgriSentry Enterprise IoT Gateway engine...");
 
-    let database_url = env::var("DATABASE_URL")
-        .expect("CRITICAL: DATABASE_URL environment variable must be set");
+    let database_url =
+        env::var("DATABASE_URL").expect("CRITICAL: DATABASE_URL environment variable must be set");
 
     // Establish high-performance, resilient PostgreSQL/TimescaleDB connection pool
     let pool = {
@@ -121,7 +122,11 @@ async fn main() -> std::io::Result<()> {
         connect_options = connect_options.statement_cache_capacity(0);
 
         while attempts < max_attempts {
-            tracing::info!("Connecting to database repository (Attempt {}/{})...", attempts + 1, max_attempts);
+            tracing::info!(
+                "Connecting to database repository (Attempt {}/{})...",
+                attempts + 1,
+                max_attempts
+            );
 
             match PgPoolOptions::new()
                 .max_connections(20)
@@ -135,7 +140,10 @@ async fn main() -> std::io::Result<()> {
                 }
                 Err(e) => {
                     attempts += 1;
-                    tracing::error!("Database connectivity handshake failed: {}. Retrying in 5 seconds...", e);
+                    tracing::error!(
+                        "Database connectivity handshake failed: {}. Retrying in 5 seconds...",
+                        e
+                    );
                     if attempts >= max_attempts {
                         break;
                     }
@@ -144,7 +152,9 @@ async fn main() -> std::io::Result<()> {
             }
         }
 
-        established_pool.expect("CRITICAL: Failed to establish PostgreSQL connection pool after maximum retry ceiling")
+        established_pool.expect(
+            "CRITICAL: Failed to establish PostgreSQL connection pool after maximum retry ceiling",
+        )
     };
 
     // Instantiate thread-safe database client and inject into Actix ecosystem shared state
@@ -169,8 +179,8 @@ async fn main() -> std::io::Result<()> {
     let analysis_pool = pool.clone();
     let mut analysis_shutdown_rx = shutdown_tx.subscribe();
 
-    let ai_api_url = env::var("AI_API_URL")
-        .unwrap_or_else(|_| "http://127.0.0.1:8000/v1/analyze".to_string());
+    let ai_api_url =
+        env::var("AI_API_URL").unwrap_or_else(|_| "http://127.0.0.1:8000/v1/analyze".to_string());
 
     let analysis_handle = tokio::spawn(async move {
         tracing::info!("🧠 AI & Rule Analysis Background Worker started in production mode.");
@@ -190,7 +200,7 @@ async fn main() -> std::io::Result<()> {
                         Ok(readings) if !readings.is_empty() => {
                             let batch_size = readings.len();
                             tracing::info!("Extracting batch of {} PENDING telemetry records for AI analytics evaluation...", batch_size);
-                            
+
                             // Log extraction phase to persistent storage
                             let extract_msg = format!("Extracted batch of {} PENDING records for AI evaluation.", batch_size);
                             if let Err(log_err) = db_worker_client.insert_system_log("RUST_CORE", "INFO", &extract_msg).await {
@@ -239,7 +249,7 @@ async fn main() -> std::io::Result<()> {
                                                     }
                                                 }
                                                 tracing::info!("🚀 Batch of {} telemetry readings analyzed, classified, and committed successfully by AI runtime.", results.len());
-                                                
+
                                                 // Log successful analysis phase to persistent storage
                                                 let success_msg = format!("Batch of {} telemetry readings classified by AI runtime.", results.len());
                                                 if let Err(log_err) = db_worker_client.insert_system_log("AI_ENGINE", "INFO", &success_msg).await {
@@ -253,7 +263,7 @@ async fn main() -> std::io::Result<()> {
                                 }
                                 Err(e) => {
                                     tracing::error!("Critical network transport failure communicating with AI microservice: {:?}", e);
-                                    
+
                                     // Log critical transport failure phase to persistent storage
                                     if let Err(log_err) = db_worker_client.insert_system_log("RUST_CORE", "CRITICAL", "Network transport failure communicating with AI microservice.").await {
                                         tracing::error!("Failed to write runtime crash log to db: {:?}", log_err);
@@ -261,7 +271,7 @@ async fn main() -> std::io::Result<()> {
                                 }
                             }
                         }
-                        Ok(_) => {} 
+                        Ok(_) => {}
                         Err(e) => tracing::error!("Error intercepted inside the Analysis Worker execution pipeline: {:?}", e),
                     }
                 }
@@ -285,7 +295,7 @@ async fn main() -> std::io::Result<()> {
             .max_age(3600);
 
         App::new()
-            .wrap(cors) 
+            .wrap(cors)
             .app_data(db_client.clone())
             // 🌐 API V1 Scope - All Dashboard and Telemetry routes live here
             .service(
@@ -294,13 +304,13 @@ async fn main() -> std::io::Result<()> {
                     .route("/dashboard/metrics", web::get().to(get_dashboard_metrics))
                     .route("/dashboard/logs", web::get().to(get_system_logs))
                     // Fixed: Registered via .service() because get_live_sensor_nodes uses an Actix attribute macro inside api.rs
-                    .service(api::get_live_sensor_nodes)
+                    .service(api::get_live_sensor_nodes),
             )
             // Global monitoring routes
             .route("/", web::get().to(health_check))
             .route("/health", web::get().to(health_check))
     })
-    .bind(("0.0.0.0", port))? 
+    .bind(("0.0.0.0", port))?
     .run();
 
     let server_handle = server.handle();
@@ -334,21 +344,33 @@ async fn main() -> std::io::Result<()> {
         }
     }
 
-    tracing::info!("Phase 1: Broadcasting shutdown interruption token to asynchronous core workers...");
+    tracing::info!(
+        "Phase 1: Broadcasting shutdown interruption token to asynchronous core workers..."
+    );
     let _ = shutdown_tx.send(true);
 
-    tracing::info!("Phase 2: Draining active in-flight networking sockets and halting Actix engine...");
+    tracing::info!(
+        "Phase 2: Draining active in-flight networking sockets and halting Actix engine..."
+    );
     server_handle.stop(true).await;
 
     tracing::info!("Phase 3: Synchronizing and awaiting structural background tasks hardware resources release...");
     if let Err(e) = mqtt_handle.await {
-        tracing::error!("MQTT Processing loop crashed during exit execution sequence: {:?}", e);
+        tracing::error!(
+            "MQTT Processing loop crashed during exit execution sequence: {:?}",
+            e
+        );
     }
     if let Err(e) = analysis_handle.await {
-        tracing::error!("Analysis Processing loop crashed during exit execution sequence: {:?}", e);
+        tracing::error!(
+            "Analysis Processing loop crashed during exit execution sequence: {:?}",
+            e
+        );
     }
 
-    tracing::info!("Phase 4: Flashing memory caches and disconnecting PostgreSQL master pool safely...");
+    tracing::info!(
+        "Phase 4: Flashing memory caches and disconnecting PostgreSQL master pool safely..."
+    );
     pool.close().await;
 
     tracing::info!("🎉 Graceful Shutdown routing finalized cleanly. AgriSentry core microservice safely closed.");

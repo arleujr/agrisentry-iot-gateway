@@ -14,7 +14,10 @@ pub enum ActionResult {
 /// The main simulation function.
 /// It evaluates a given rule against a set of sensor data and returns an action.
 pub fn simulate_rule(rule: &RuleFromDb, data: &TelemetryData) -> ActionResult {
-    println!("[SIMULATOR] Simulating rule with sensor value: {}", data.value);
+    println!(
+        "[SIMULATOR] Simulating rule with sensor value: {}",
+        data.value
+    );
 
     let mut should_activate = false;
 

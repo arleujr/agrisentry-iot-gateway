@@ -1,17 +1,17 @@
-use rumqttc::{AsyncClient, MqttOptions, QoS, Event, Incoming, Transport, TlsConfiguration};
+use crate::db::DbClient;
+use crate::models::MqttPayload;
+use rumqttc::{AsyncClient, Event, Incoming, MqttOptions, QoS, TlsConfiguration, Transport};
 use sqlx::PgPool;
 use std::time::Duration;
-use tokio::sync::watch;
-use crate::db::DbClient;
-use crate::models::MqttPayload; // Structured MQTT payload model
+use tokio::sync::watch; // Structured MQTT payload model
 
 /// Initializes and runs the background MQTT worker task.
 /// This worker handles subscription, message ingestion, and graceful shutdown.
 pub async fn start_mqtt_worker(
-    pool: PgPool, 
-    broker_host: &str, 
-    broker_port: u16, 
-    mut shutdown_rx: watch::Receiver<bool>
+    pool: PgPool,
+    broker_host: &str,
+    broker_port: u16,
+    mut shutdown_rx: watch::Receiver<bool>,
 ) {
     // Configure buffer size from environment variable (default = 100)
     let buffer_size: usize = std::env::var("MQTT_BUFFER_SIZE")
@@ -26,11 +26,13 @@ pub async fn start_mqtt_worker(
     // 🔑 Critical fix: Capture and inject EMQX credentials provided by Render
     let mqtt_user = std::env::var("MQTT_USER").unwrap_or_else(|_| "".to_string());
     let mqtt_pass = std::env::var("MQTT_PASS").unwrap_or_else(|_| "".to_string());
-    
+
     if !mqtt_user.is_empty() && !mqtt_pass.is_empty() {
         mqttoptions.set_credentials(mqtt_user, mqtt_pass);
     } else {
-        tracing::error!("🚨 ERROR: Environment variables MQTT_USER or MQTT_PASS not found in Render!");
+        tracing::error!(
+            "🚨 ERROR: Environment variables MQTT_USER or MQTT_PASS not found in Render!"
+        );
     }
 
     // 🔐 Corrected line: Enable native TLS transport using the Transport::Tls enum variant
@@ -39,11 +41,21 @@ pub async fn start_mqtt_worker(
     // Create asynchronous MQTT client and event loop
     let (client, mut eventloop) = AsyncClient::new(mqttoptions, buffer_size);
 
-    tracing::info!("MQTT Worker attempting connection to broker {}:{}", broker_host, broker_port);
-    
+    tracing::info!(
+        "MQTT Worker attempting connection to broker {}:{}",
+        broker_host,
+        broker_port
+    );
+
     // Subscribe to the gateway topic hierarchy
-    if let Err(e) = client.subscribe("agrisentry/gateway/#", QoS::AtLeastOnce).await {
-        tracing::error!("CRITICAL: Failed to subscribe to core gateway routing hierarchy: {:?}", e);
+    if let Err(e) = client
+        .subscribe("agrisentry/gateway/#", QoS::AtLeastOnce)
+        .await
+    {
+        tracing::error!(
+            "CRITICAL: Failed to subscribe to core gateway routing hierarchy: {:?}",
+            e
+        );
         return;
     }
     tracing::info!("MQTT Client successfully subscribed to 'agrisentry/gateway/#'");
@@ -67,18 +79,18 @@ pub async fn start_mqtt_worker(
                 match notification {
                     Ok(Event::Incoming(Incoming::Publish(p))) => {
                         let topic_parts: Vec<&str> = p.topic.split('/').collect();
-                        
+
                         if topic_parts.len() >= 4 {
                             let mac_address = topic_parts[2].to_string();
                             let sensor_type = topic_parts[3].to_string();
-                            
+
                             if let Ok(payload_str) = String::from_utf8(p.payload.to_vec()) {
                                 // ✅ Deserialize structured JSON payload (value + timestamp)
                                 if let Ok(mqtt_data) = serde_json::from_str::<MqttPayload>(&payload_str) {
                                     let db_client = DbClient::new(pool.clone());
                                     let mac_address_clone = mac_address.clone();
                                     let sensor_type_clone = sensor_type.clone();
-                                    
+
                                     tokio::spawn(async move {
                                         // Insert reading into TimescaleDB
                                         match db_client.insert_mqtt_reading(&mac_address_clone, mqtt_data.value, mqtt_data.timestamp).await {
@@ -113,7 +125,7 @@ pub async fn start_mqtt_worker(
                             }
                         }
                     }
-                    Ok(_) => {} 
+                    Ok(_) => {}
                     Err(e) => {
                         tracing::error!("MQTT connection error: {:?}. Retrying after delay...", e);
                         tokio::time::sleep(Duration::from_secs(5)).await;

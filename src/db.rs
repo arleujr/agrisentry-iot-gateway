@@ -1,8 +1,8 @@
 // db.rs
-use sqlx::{PgPool, Postgres};
-use crate::models::{SensorPayload, DataQualityStatus};
 use crate::error::GatewayError;
+use crate::models::{DataQualityStatus, SensorPayload};
 use chrono::{DateTime, Utc};
+use sqlx::{PgPool, Postgres};
 use uuid::Uuid;
 
 /// Database client wrapper for PostgreSQL/TimescaleDB connection pool
@@ -19,10 +19,10 @@ impl DbClient {
 
     /// Inserts a structured system log event into database storage for UI terminal observability
     pub async fn insert_system_log(
-        &self, 
-        component: &str, 
-        level: &str, 
-        message: &str
+        &self,
+        component: &str,
+        level: &str,
+        message: &str,
     ) -> Result<(), GatewayError> {
         sqlx::query(
             r#"
@@ -65,10 +65,10 @@ impl DbClient {
     /// Inserts a telemetry reading into TimescaleDB from MQTT
     /// - Similar to insert_reading but accepts raw parameters
     pub async fn insert_mqtt_reading(
-        &self, 
-        device_id: &str, 
-        value: f64, 
-        timestamp: DateTime<Utc>
+        &self,
+        device_id: &str,
+        value: f64,
+        timestamp: DateTime<Utc>,
     ) -> Result<u64, GatewayError> {
         let result = sqlx::query(
             r#"
@@ -91,8 +91,8 @@ impl DbClient {
     /// Fetches records with status Pending for processing
     /// - Returns a vector of tuples (id, value, created_at)
     pub async fn fetch_pending_readings(
-        &self, 
-        limit: i64
+        &self,
+        limit: i64,
     ) -> Result<Vec<(Uuid, f64, DateTime<Utc>)>, GatewayError> {
         // Explicit tuple mapping avoids strict macro conflicts
         let rows = sqlx::query_as::<Postgres, (Uuid, f64, DateTime<Utc>)>(
@@ -114,11 +114,11 @@ impl DbClient {
     /// Updates the status of a record after AI or Rules Engine analysis
     /// - Matches both id and created_at to ensure exact record update
     pub async fn update_reading_status(
-        &self, 
-        id: Uuid, 
-        created_at: DateTime<Utc>, 
-        status: DataQualityStatus, 
-        note: &str
+        &self,
+        id: Uuid,
+        created_at: DateTime<Utc>,
+        status: DataQualityStatus,
+        note: &str,
     ) -> Result<(), GatewayError> {
         sqlx::query(
             r#"

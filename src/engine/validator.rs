@@ -1,4 +1,4 @@
-use crate::models::{SensorPayload, RuleFromDb};
+use crate::models::{RuleFromDb, SensorPayload};
 
 /// Validates and parses the incoming raw JSON string into a SensorPayload.
 /// Ensures graceful error handling instead of panicking.
@@ -15,10 +15,16 @@ pub fn validate_rule(rule: &RuleFromDb) -> Result<(), String> {
     // 1. Validate the trigger condition
     match rule.trigger_condition.as_str() {
         "LESS_THAN" | "GREATER_THAN" | "EQUAL_TO" => {
-            println!("[VALIDATOR] Condition '{}' is valid.", rule.trigger_condition);
+            println!(
+                "[VALIDATOR] Condition '{}' is valid.",
+                rule.trigger_condition
+            );
         }
         _ => {
-            let error_message = format!("[VALIDATOR] Error: Invalid trigger condition '{}'.", rule.trigger_condition);
+            let error_message = format!(
+                "[VALIDATOR] Error: Invalid trigger condition '{}'.",
+                rule.trigger_condition
+            );
             println!("{}", error_message);
             return Err(error_message);
         }
@@ -30,7 +36,10 @@ pub fn validate_rule(rule: &RuleFromDb) -> Result<(), String> {
             println!("[VALIDATOR] Action '{}' is valid.", rule.action_type);
         }
         _ => {
-            let error_message = format!("[VALIDATOR] Error: Invalid action type '{}'.", rule.action_type);
+            let error_message = format!(
+                "[VALIDATOR] Error: Invalid action type '{}'.",
+                rule.action_type
+            );
             println!("{}", error_message);
             return Err(error_message);
         }
@@ -91,7 +100,10 @@ mod tests {
         };
 
         let result = validate_rule(&bad_rule);
-        assert!(result.is_err(), "Invalid trigger conditions must return an Err");
+        assert!(
+            result.is_err(),
+            "Invalid trigger conditions must return an Err"
+        );
         assert!(result.unwrap_err().contains("Invalid trigger condition"));
     }
 
