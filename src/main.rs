@@ -1,19 +1,16 @@
 use actix_web::{web, App, HttpResponse, HttpServer, Responder};
 use actix_cors::Cors; // CORS Middleware to allow the Vue frontend to connect
 use sqlx::postgres::PgPoolOptions;
+use sqlx::Row; // Required for dynamic query field extraction (.get)
 
 use std::env;
 use std::time::Duration;
 use tokio::signal;
 use tokio::sync::watch;
 
-// Module declarations
-mod models;
-mod engine;
-use crate::engine::mqtt;
-mod error;
-mod api;
-mod db;
+// Bring the unified library modules into the binary scope
+use agrisentry_iot_gateway::{api, db, engine, models};
+use engine::mqtt;
 
 /// Helper function to safely map Python's API string responses to Rust's strong types
 fn status_from_str(status: &str) -> Option<models::DataQualityStatus> {
@@ -35,12 +32,13 @@ async fn health_check() -> impl Responder {
 }
 
 /// Real-time metrics aggregator query exposing telemetry and data quality KPI metrics for dashboards
-async fn get_dashboard_metrics(db_client: web::Data<crate::db::DbClient>) -> impl Responder {
-    match sqlx::query!(
+async fn get_dashboard_metrics(db_client: web::Data<db::DbClient>) -> impl Responder {
+    // Switched to dynamic sqlx::query to avoid compile-time environment requirements during cargo test
+    match sqlx::query(
         r#"
         SELECT 
-            status AS "status: models::DataQualityStatus",
-            COUNT(*) as "count!"
+            status::text AS status,
+            COUNT(*) as count
         FROM "sensor_readings"
         WHERE created_at > NOW() - INTERVAL '24 hours'
         GROUP BY status;
@@ -53,9 +51,11 @@ async fn get_dashboard_metrics(db_client: web::Data<crate::db::DbClient>) -> imp
             let metrics: Vec<serde_json::Value> = records
                 .into_iter()
                 .map(|rec| {
+                    let status_str: String = rec.get("status");
+                    let count: i64 = rec.get("count");
                     serde_json::json!({
-                        "status": format!("{:?}", rec.status),
-                        "count": rec.count
+                        "status": status_str,
+                        "count": count
                     })
                 })
                 .collect();
@@ -69,19 +69,26 @@ async fn get_dashboard_metrics(db_client: web::Data<crate::db::DbClient>) -> imp
 }
 
 /// Retrieve latest system logs for the Vue Dashboard
-async fn get_system_logs(db_client: web::Data<crate::db::DbClient>) -> impl Responder {
-    match sqlx::query!(
+async fn get_system_logs(db_client: web::Data<db::DbClient>) -> impl Responder {
+    // Switched to dynamic sqlx::query to allow isolated integration tests execution safely
+    match sqlx::query(
         r#"SELECT component, message, level, created_at FROM "system_events" ORDER BY id DESC LIMIT 25"#
     )
     .fetch_all(&db_client.pool)
     .await {
         Ok(rows) => {
-            let logs: Vec<serde_json::Value> = rows.into_iter().map(|r| serde_json::json!({
-                "component": r.component,
-                "message": r.message,
-                "level": r.level,
-                "created_at": r.created_at
-            })).collect();
+            let logs: Vec<serde_json::Value> = rows.into_iter().map(|r| {
+                let component: String = r.get("component");
+                let message: String = r.get("message");
+                let level: String = r.get("level");
+                let created_at: chrono::DateTime<chrono::Utc> = r.get("created_at");
+                serde_json::json!({
+                    "component": component,
+                    "message": message,
+                    "level": level,
+                    "created_at": created_at
+                })
+            }).collect();
             HttpResponse::Ok().json(logs)
         }
         Err(e) => {
@@ -141,7 +148,7 @@ async fn main() -> std::io::Result<()> {
     };
 
     // Instantiate thread-safe database client and inject into Actix ecosystem shared state
-    let db_client = web::Data::new(crate::db::DbClient::new(pool.clone()));
+    let db_client = web::Data::new(db::DbClient::new(pool.clone()));
 
     // Broadcast channel to safely orchestrate graceful shutdown sequences across background tasks
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
@@ -167,7 +174,7 @@ async fn main() -> std::io::Result<()> {
 
     let analysis_handle = tokio::spawn(async move {
         tracing::info!("🧠 AI & Rule Analysis Background Worker started in production mode.");
-        let db_worker_client = crate::db::DbClient::new(analysis_pool);
+        let db_worker_client = db::DbClient::new(analysis_pool);
         let http_client = reqwest::Client::new();
 
         loop {
@@ -283,10 +290,11 @@ async fn main() -> std::io::Result<()> {
             // 🌐 API V1 Scope - All Dashboard and Telemetry routes live here
             .service(
                 web::scope("/api/v1")
-                    .service(crate::api::ingest_telemetry)
+                    .service(api::ingest_telemetry)
                     .route("/dashboard/metrics", web::get().to(get_dashboard_metrics))
                     .route("/dashboard/logs", web::get().to(get_system_logs))
-                    .route("/dashboard/sensors/latest", web::get().to(crate::api::get_live_sensor_nodes))
+                    // Fixed: Registered via .service() because get_live_sensor_nodes uses an Actix attribute macro inside api.rs
+                    .service(api::get_live_sensor_nodes)
             )
             // Global monitoring routes
             .route("/", web::get().to(health_check))
