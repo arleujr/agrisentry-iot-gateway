@@ -1,9 +1,10 @@
 use crate::db::DbClient;
 use crate::models::{SensorNodeMetrics, SensorPayload};
 use actix_web::{get, post, web, HttpResponse, Responder};
+use tokio::sync::mpsc::Sender; // Essential async channel
 use tracing::{error, info};
 
-/// REST Endpoint for infrastructure and orchestration health checks.
+/// Health check endpoint
 #[get("/health")]
 pub async fn health_check() -> impl Responder {
     HttpResponse::Ok().json(serde_json::json!({
@@ -13,37 +14,33 @@ pub async fn health_check() -> impl Responder {
     }))
 }
 
-/// HTTP Endpoint for REST telemetry ingestion.
-/// Ideal for testing, integrations, or edge devices without MQTT capabilities.
+/// HTTP telemetry ingestion (for devices without MQTT)
 #[post("/telemetry")]
 pub async fn ingest_telemetry(
-    db: web::Data<DbClient>,
+    tx: web::Data<Sender<SensorPayload>>, // Injected channel sender
     payload: web::Json<SensorPayload>,
 ) -> impl Responder {
     info!("Received HTTP telemetry from device: {}", payload.device_id);
 
-    // Unwraps the JSON payload and sends it to our DB core
-    match db.insert_reading(&payload.into_inner()).await {
-        Ok(_) => HttpResponse::Ok().json(serde_json::json!({
-            "status": "success",
-            "message": "Telemetry queued as PENDING for AI analysis"
+    // Push telemetry into async buffer (RAM)
+    match tx.send(payload.into_inner()).await {
+        Ok(_) => HttpResponse::Accepted().json(serde_json::json!({
+            "status": "accepted",
+            "message": "Telemetry queued for background processing"
         })),
         Err(e) => {
-            error!("Failed to persist HTTP telemetry: {:?}", e);
-            HttpResponse::InternalServerError().json(serde_json::json!({
+            error!("Failed to enqueue telemetry: {:?}", e);
+            HttpResponse::ServiceUnavailable().json(serde_json::json!({
                 "status": "error",
-                "message": "Internal database error"
+                "message": "Ingestion buffer capacity reached"
             }))
         }
     }
 }
 
-/// High-Performance Descriptive Statistics Aggregation Engine.
-/// Refactored with strict Enterprise LEFT JOIN architectures to prevent UI starvation.
+/// Aggregated sensor node metrics
 #[get("/nodes")]
 pub async fn get_live_sensor_nodes(db_client: web::Data<DbClient>) -> impl Responder {
-    // Professional LEFT JOIN Query ensuring inventory nodes persist even with empty telemetry states
-    // Added explicit type casts to string text for seamless enum parsing into strong Rust types
     let query = r#"
         WITH telemetry_stats AS (
             SELECT
@@ -81,26 +78,22 @@ pub async fn get_live_sensor_nodes(db_client: web::Data<DbClient>) -> impl Respo
         ORDER BY s.name ASC;
     "#;
 
-    // Maps rows efficiently to SensorNodeMetrics safely handling potential database NULL markers
     match sqlx::query_as::<_, SensorNodeMetrics>(query)
         .fetch_all(&db_client.pool)
         .await
     {
         Ok(metrics) => HttpResponse::Ok().json(metrics),
         Err(e) => {
-            error!(
-                "Database descriptive statistics processing matrix failure: {:?}",
-                e
-            );
+            error!("Failed to aggregate telemetry: {:?}", e);
             HttpResponse::InternalServerError().json(serde_json::json!({
-                "error": "Telemetry aggregation pipeline execution failure",
+                "error": "Telemetry aggregation failure",
                 "details": format!("{:?}", e)
             }))
         }
     }
 }
 
-/// Unified routing configuration to plug seamlessly into main.rs Actix entrypoint
+/// Service configuration
 pub fn config_services(cfg: &mut web::ServiceConfig) {
     cfg.service(health_check);
     cfg.service(ingest_telemetry);
@@ -108,7 +101,7 @@ pub fn config_services(cfg: &mut web::ServiceConfig) {
 }
 
 // =========================================================================
-// INTEGRATION ROUTE TESTING SUITE
+// Integration tests
 // =========================================================================
 #[cfg(test)]
 mod tests {
@@ -117,20 +110,11 @@ mod tests {
 
     #[actix_web::test]
     async fn test_health_check_endpoint_returns_200_ok() {
-        // Arrange: Initialize the test server mapping our decoupled routing setup
         let app = test::init_service(App::new().configure(config_services)).await;
-
-        // Act: Fire a structured mock GET request targeting the health gateway
         let req = test::TestRequest::get().uri("/health").to_request();
         let resp = test::call_service(&app, req).await;
 
-        // Assert: Ensure ecosystem robustness by validating the status code
-        assert!(
-            resp.status().is_success(),
-            "The infrastructure health route is failing"
-        );
-
-        // Assert: Parse body payload to secure JSON contract preservation
+        assert!(resp.status().is_success(), "Health route failed");
         let body: serde_json::Value = test::read_body_json(resp).await;
         assert_eq!(body["status"], "healthy");
         assert_eq!(body["service"], "agrisentry-iot-gateway");
