@@ -8,6 +8,7 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  SQLX_OFFLINE: true          # Garante que o pipeline valide as queries SQL sem precisar do banco real ligado
 
 jobs:
   code-quality-and-testing:
@@ -21,7 +22,8 @@ jobs:
       - name: Setup Rust Toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          components: fmt, clippy
+          toolchain: stable
+          components: rustfmt, clippy  # Sintaxe corrigida (rustfmt em vez de fmt) para evitar o erro de depreciação
 
       - name: Rust Cache Dependencies
         uses: swatinem/rust-cache@v2
