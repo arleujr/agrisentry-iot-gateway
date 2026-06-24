@@ -280,6 +280,39 @@ async fn main() -> std::io::Result<()> {
         tracing::info!("🏁 Analysis Background Worker fully decoupled and terminated.");
     });
 
+    // =====================================================================
+    // 🛡️ HIGH-PERFORMANCE IN-MEMORY BUFFER (PRODUCER-CONSUMER PATTERN)
+    // =====================================================================
+    tracing::info!("📦 Initializing MPSC in-memory buffer for high-throughput telemetry stream...");
+
+    // Initialize an asynchronous channel with a capacity of 1000 queued readings
+    // This acts as a shock-absorber during burst telemetry transmission, preventing database connection exhaustion.
+    let (telemetry_tx, mut telemetry_rx) =
+        tokio::sync::mpsc::channel::<models::SensorPayload>(1000);
+
+    // Isolate a database client instance specifically for the background consumer thread
+    let consumer_db_client = db::DbClient::new(pool.clone());
+
+    // Spawn the Consumer (Background Worker) to process the queue sequentially
+    tokio::spawn(async move {
+        tracing::info!(
+            "👷 MPSC Consumer worker successfully deployed and running in background..."
+        );
+
+        // Perpetually await incoming payloads from the channel and execute database inserts
+        while let Some(payload) = telemetry_rx.recv().await {
+            if let Err(e) = consumer_db_client.insert_reading(&payload).await {
+                tracing::error!(
+                    "MPSC Consumer failed to persist reading to database repository: {:?}",
+                    e
+                );
+            }
+        }
+    });
+
+    // Wrap the Producer (TX) side to inject into the Actix-Web shared application state
+    let tx_data = web::Data::new(telemetry_tx);
+
     let port: u16 = env::var("PORT")
         .unwrap_or_else(|_| "8080".to_string())
         .parse()
@@ -297,6 +330,7 @@ async fn main() -> std::io::Result<()> {
         App::new()
             .wrap(cors)
             .app_data(db_client.clone())
+            .app_data(tx_data.clone()) // Inject the MPSC Transmitter into the application scope
             // 🌐 API V1 Scope - All Dashboard and Telemetry routes live here
             .service(
                 web::scope("/api/v1")

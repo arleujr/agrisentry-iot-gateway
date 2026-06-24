@@ -35,11 +35,9 @@ export default function () {
 
     const res = http.post(url, payload, params);
 
-    // CORREÇÃO: Validando o status 202 (Accepted) do seu sistema assíncrono
     check(res, {
         'Status is 202': (r) => r.status === 202,
     });
 
-    // Aumento leve no sleep para evitar sobrecarga de conexão no Render
     sleep(1); 
 }
