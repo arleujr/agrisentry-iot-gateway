@@ -29,3 +29,5 @@ data.json
 .vscode/
 .idea/
 .DS_Store
+# Public environment template
+!.env.example
