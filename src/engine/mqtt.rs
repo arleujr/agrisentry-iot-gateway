@@ -1,7 +1,8 @@
 use crate::contracts::mqtt_v1::{parse_telemetry_message, TELEMETRY_TOPIC_FILTER};
-use crate::db::DbClient;
+use crate::db::{DbClient, TelemetryPersistenceOutcome};
 use crate::models::MqttPayload;
 use rumqttc::{AsyncClient, Event, Incoming, MqttOptions, QoS, TlsConfiguration, Transport};
+use serde_json::Value;
 use sqlx::PgPool;
 use std::time::Duration;
 use tokio::sync::watch;
@@ -91,7 +92,11 @@ pub async fn start_mqtt_worker(
                 match notification {
                     Ok(Event::Incoming(Incoming::Publish(publish))) => {
                         if publish.topic.starts_with("agrisentry/v1/") {
-                            handle_v1_telemetry(&publish.topic, publish.payload.as_ref());
+                            handle_v1_telemetry(
+                                pool.clone(),
+                                &publish.topic,
+                                publish.payload.as_ref(),
+                            );
                         } else if legacy_enabled {
                             handle_legacy_telemetry(
                                 pool.clone(),
@@ -113,26 +118,63 @@ pub async fn start_mqtt_worker(
     tracing::info!("MQTT worker terminated");
 }
 
-fn handle_v1_telemetry(topic: &str, payload: &[u8]) {
-    match parse_telemetry_message(topic, payload) {
-        Ok(envelope) => {
-            tracing::info!(
-                event_id = %envelope.event_id,
-                device_id = %envelope.device_id,
-                sequence = envelope.sequence,
-                observed_at = %envelope.observed_at,
-                reading_count = envelope.readings.len(),
-                "MQTT v1 telemetry accepted by the contract layer"
-            );
+fn handle_v1_telemetry(pool: PgPool, topic: &str, payload: &[u8]) {
+    let raw_payload = match serde_json::from_slice::<Value>(payload) {
+        Ok(value) => value,
+        Err(error) => {
+            tracing::warn!(topic, ?error, "MQTT v1 payload is not valid JSON");
+            return;
         }
+    };
+
+    let envelope = match parse_telemetry_message(topic, payload) {
+        Ok(envelope) => envelope,
         Err(error) => {
             tracing::warn!(
                 topic,
                 error = %error,
                 "MQTT v1 telemetry rejected"
             );
+            return;
         }
-    }
+    };
+
+    tokio::spawn(async move {
+        let db_client = DbClient::new(pool);
+
+        match db_client
+            .persist_telemetry_v1(&envelope, &raw_payload)
+            .await
+        {
+            Ok(TelemetryPersistenceOutcome::Inserted { readings }) => {
+                tracing::info!(
+                    event_id = %envelope.event_id,
+                    device_id = %envelope.device_id,
+                    sequence = envelope.sequence,
+                    observed_at = %envelope.observed_at,
+                    reading_count = readings,
+                    "MQTT v1 telemetry persisted"
+                );
+            }
+            Ok(TelemetryPersistenceOutcome::Duplicate) => {
+                tracing::info!(
+                    event_id = %envelope.event_id,
+                    device_id = %envelope.device_id,
+                    sequence = envelope.sequence,
+                    "duplicate MQTT v1 telemetry ignored"
+                );
+            }
+            Err(error) => {
+                tracing::error!(
+                    event_id = %envelope.event_id,
+                    device_id = %envelope.device_id,
+                    sequence = envelope.sequence,
+                    ?error,
+                    "MQTT v1 telemetry persistence failed"
+                );
+            }
+        }
+    });
 }
 
 fn handle_legacy_telemetry(pool: PgPool, topic: &str, payload: &[u8]) {
