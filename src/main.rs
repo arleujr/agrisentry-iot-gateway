@@ -22,7 +22,16 @@ fn status_from_str(status: &str) -> Option<models::DataQualityStatus> {
         _ => None,
     }
 }
-
+fn environment_bool(name: &str, default: bool) -> bool {
+    env::var(name)
+        .ok()
+        .and_then(|value| match value.trim().to_ascii_lowercase().as_str() {
+            "1" | "true" | "yes" | "on" => Some(true),
+            "0" | "false" | "no" | "off" => Some(false),
+            _ => None,
+        })
+        .unwrap_or(default)
+}
 /// Active health check endpoint for cluster orchestration and monitoring liveness probes
 async fn health_check() -> impl Responder {
     HttpResponse::Ok().json(serde_json::json!({
@@ -175,7 +184,8 @@ async fn main() -> std::io::Result<()> {
         mqtt::start_mqtt_worker(mqtt_pool, &mqtt_host, mqtt_port, shutdown_rx).await;
     });
 
-    // 🧠 Spawn Analysis Worker (Enterprise pipeline integrated with FastAPI AI microservice)
+    //  Spawn Analysis Worker (Enterprise pipeline integrated with FastAPI AI microservice)
+    let analysis_worker_enabled = environment_bool("ANALYSIS_WORKER_ENABLED", true);
     let analysis_pool = pool.clone();
     let mut analysis_shutdown_rx = shutdown_tx.subscribe();
 
@@ -183,7 +193,13 @@ async fn main() -> std::io::Result<()> {
         env::var("AI_API_URL").unwrap_or_else(|_| "http://127.0.0.1:8000/v1/analyze".to_string());
 
     let analysis_handle = tokio::spawn(async move {
-        tracing::info!("🧠 AI & Rule Analysis Background Worker started in production mode.");
+        if !analysis_worker_enabled {
+            tracing::info!("AI & Rule Analysis Background Worker disabled by configuration.");
+            return;
+        }
+
+        tracing::info!("AI & Rule Analysis Background Worker started in production mode.");
+
         let db_worker_client = db::DbClient::new(analysis_pool);
         let http_client = reqwest::Client::new();
 

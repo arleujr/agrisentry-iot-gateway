@@ -1,0 +1,66 @@
+{
+  "protocol_version": "1.0",
+  "event_id": "f9365dd3-7c29-45d0-8123-5703dcff904a",
+  "device_id": "hydro-lab-node-01",
+  "sequence": 1,
+  "observed_at": "2026-07-24T18:00:00.000Z",
+  "firmware_version": "2.0.0-alpha.1",
+  "readings": [
+    {
+      "channel": "air_temperature",
+      "raw_value": 27.4,
+      "value": 27.4,
+      "unit": "celsius",
+      "quality": "valid",
+      "calibration_id": null
+    },
+    {
+      "channel": "air_relative_humidity",
+      "raw_value": 68.2,
+      "value": 68.2,
+      "unit": "percent",
+      "quality": "valid",
+      "calibration_id": null
+    },
+    {
+      "channel": "solution_temperature",
+      "raw_value": 2048,
+      "value": 23.1,
+      "unit": "celsius",
+      "quality": "estimated",
+      "calibration_id": "cal-ntc-local-001"
+    },
+    {
+      "channel": "solution_ph",
+      "raw_value": 1880,
+      "value": 6.18,
+      "unit": "ph",
+      "quality": "not_calibrated",
+      "calibration_id": null
+    },
+    {
+      "channel": "solution_tds",
+      "raw_value": 1420,
+      "value": 735,
+      "unit": "ppm",
+      "quality": "estimated",
+      "calibration_id": "cal-tds-local-001"
+    },
+    {
+      "channel": "reservoir_level",
+      "raw_value": 2500,
+      "value": 72,
+      "unit": "percent",
+      "quality": "estimated",
+      "calibration_id": "cal-level-local-001"
+    },
+    {
+      "channel": "relative_light",
+      "raw_value": 3100,
+      "value": 84,
+      "unit": "percent",
+      "quality": "estimated",
+      "calibration_id": "cal-light-local-001"
+    }
+  ]
+}
