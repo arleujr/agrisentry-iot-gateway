@@ -1,0 +1,38 @@
+name: agrisentry-gateway-local
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: agrisentry-local-db
+    environment:
+      POSTGRES_DB: agrisentry_local
+      POSTGRES_USER: agrisentry_local
+      POSTGRES_PASSWORD: local_only_change_me
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - agrisentry-local-db-data:/var/lib/postgresql/data
+      - ./migrations:/migrations:ro
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U agrisentry_local -d agrisentry_local",
+        ]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+    restart: unless-stopped
+
+  mqtt:
+    image: eclipse-mosquitto:2.0
+    container_name: agrisentry-local-mqtt
+    ports:
+      - "127.0.0.1:1883:1883"
+    volumes:
+      - ./infra/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+    restart: unless-stopped
+
+volumes:
+  agrisentry-local-db-data:
