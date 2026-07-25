@@ -4,9 +4,13 @@ const E2E_SCRIPT: &str = include_str!("../scripts/local/test-e2e.ps1");
 const RUN_GATEWAY_SCRIPT: &str = include_str!("../scripts/local/run-gateway.ps1");
 
 #[test]
-fn local_services_are_bound_to_loopback() {
+fn local_database_is_bound_to_loopback() {
     assert!(COMPOSE.contains("127.0.0.1:5432:5432"));
-    assert!(COMPOSE.contains("127.0.0.1:1883:1883"));
+}
+
+#[test]
+fn mqtt_bind_address_is_configurable_with_loopback_default() {
+    assert!(COMPOSE.contains("${AGRISENTRY_MQTT_BIND_IP:-127.0.0.1}:1883:1883"));
 }
 
 #[test]
@@ -15,10 +19,9 @@ fn local_database_image_is_pinned() {
 }
 
 #[test]
-fn anonymous_mqtt_is_explicitly_local_only() {
+fn anonymous_mqtt_is_explicitly_for_the_device_lab() {
     assert!(MOSQUITTO.contains("allow_anonymous true"));
-    assert!(MOSQUITTO.contains("Local development broker only"));
-    assert!(COMPOSE.contains("127.0.0.1:1883:1883"));
+    assert!(COMPOSE.contains("AGRISENTRY_MQTT_BIND_IP"));
 }
 
 #[test]
